@@ -9,11 +9,10 @@ from bs4 import BeautifulSoup
 from streamlit_autorefresh import st_autorefresh
 import urllib3
 
-# 加上這行可以關閉「關閉驗證」後出現的警告訊息
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
-# --- 0. 登入邏輯檢查 ---
 def check_login():
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
@@ -57,7 +56,7 @@ st.set_page_config(page_title="台股 1-15 項極速監控", layout="wide")
 # """,
 #     unsafe_allow_html=True,
 # )
-# # 隱藏 Streamlit 預設的 Footer 浮水印
+
 # hide_streamlit_style = """
 #             <style>
 #             #MainMenu {visibility: hidden;}
@@ -96,13 +95,12 @@ st.markdown(
 )
 
 
-# --- 1. 初始化與連線 ---
 def init_connection():
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive",
     ]
-    # 請確保您的 creds.json 檔案存在
+
     creds_dict = st.secrets["gcp_service_account"]
 
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
@@ -113,15 +111,15 @@ def init_connection():
 
 client = init_connection()
 spreadsheet = client.open_by_key("10Oz6imH-bywS6sk23HquvgUw-3rKHLMU4g8MCC8ek-M")
-sheet1 = spreadsheet.get_worksheet(0)  # 參數紀錄
-sheet2 = spreadsheet.get_worksheet(1)  # 群組定義
+sheet1 = spreadsheet.get_worksheet(0)
+sheet2 = spreadsheet.get_worksheet(1)
 
 current_user = st.session_state.current_user
 
 st.title("📈 股票參數永久保存系統")
 st.caption(f"當前使用者：{current_user}")
 
-# --- 2. 側邊欄：群組管理 (篩選使用者) ---
+
 with st.sidebar:
     if st.button("🚪 登出系統"):
         st.session_state.logged_in = False
@@ -131,7 +129,7 @@ with st.sidebar:
     new_group_name = st.text_input("建立新群組名稱")
     if st.button("➕ 建立群組", use_container_width=True):
         if new_group_name:
-            # 工作表二：第一欄 username, 第二欄 class
+
             sheet2.append_row([current_user, new_group_name])
             st.success(f"群組 '{new_group_name}' 建立成功！")
             st.rerun()
@@ -140,8 +138,7 @@ with st.sidebar:
 
     st.divider()
 
-    # 讀取群組並篩選屬於目前使用者的群組
-    group_data = sheet2.get_all_records()  # 使用 get_all_records 較易根據欄位篩選
+    group_data = sheet2.get_all_records()
     df_groups = pd.DataFrame(group_data)
 
     if not df_groups.empty and "username" in df_groups.columns:
@@ -163,7 +160,6 @@ with st.sidebar:
         day_c = st.number_input("天數 C (day_c)", min_value=1, value=60)  # 新增 day_c
         submitted = st.form_submit_button("💾 永久儲存至雲端", use_container_width=True)
 
-# --- 3. 處理參數寫入 (加入資料隔離與 Day C) ---
 if submitted:
     if not user_groups:
         st.sidebar.error("❌ 請先建立群組後再儲存！")
@@ -174,7 +170,7 @@ if submitted:
 
         existing_row_index = None
         if not df_existing.empty:
-            # 嚴格篩選：必須是該使用者且代號相同
+
             match = df_existing[
                 (df_existing["username"] == current_user)
                 & (df_existing["no"].astype(str) == str(stock_no))
@@ -183,25 +179,25 @@ if submitted:
                 existing_row_index = match.index[0]
                 old_day_a = match.iloc[0]["day_a"]
                 old_day_b = match.iloc[0]["day_b"]
-                old_day_c = match.iloc[0].get("day_c", 0)  # 取得舊的 day_c
+                old_day_c = match.iloc[0].get("day_c", 0)
 
         if existing_row_index is not None:
-            # 檢查是否有變動 (包含 day_c)
+
             if old_day_a == day_a and old_day_b == day_b and old_day_c == day_c:
                 st.sidebar.info(f"ℹ️ {stock_no} 參數相同，無需更新。")
             else:
-                # 更新邏輯 (假設欄位：1.時間, 2.username, 3.no, 4.day_a, 5.day_b, 6.day_c, 7.class)
+
                 row_to_update = int(existing_row_index) + 2
                 sheet1.update_cell(row_to_update, 1, now_time)
                 sheet1.update_cell(row_to_update, 4, day_a)
                 sheet1.update_cell(row_to_update, 5, day_b)
-                sheet1.update_cell(row_to_update, 6, day_c)  # 更新 Day C
-                sheet1.update_cell(row_to_update, 7, category)  # 更新 Class 移至第 7 欄
+                sheet1.update_cell(row_to_update, 6, day_c)
+                sheet1.update_cell(row_to_update, 7, category)
 
                 st.sidebar.success(f"🔄 {stock_no} 的參數已更新！")
                 st.rerun()
         else:
-            # 新增資料：時間, username, no, day_a, day_b, day_c, class
+
             new_row = [now_time, current_user, stock_no, day_a, day_b, day_c, category]
             sheet1.append_row(new_row)
             st.sidebar.success(f"✅ {stock_no} 已新增儲存！")
@@ -210,12 +206,6 @@ if submitted:
         st.sidebar.error("請填寫股票代號 (No)")
 
 
-# _______________________________以下是股票程式___________________________________________
-
-
-# ======================
-# 2. 資料抓取函數 (保持不變)
-# ======================
 @st.cache_data(ttl=3600)
 def get_history_base(stock_no, max_count):
     now = datetime.now()
@@ -284,9 +274,6 @@ def get_realtime_info(stock_no):
         return None
 
 
-# ======================
-# 3. 預估量權重表 (保持不變)
-# ======================
 EST_FACTORS = {
     "09:05": 14.99,
     "09:10": 9.48,
@@ -359,37 +346,27 @@ def get_est_factor(current_time_str):
     return factor
 
 
-# ======================
-# 4. 資料清單設定
-# ======================
-# 1. 依照登入的帳號去 sheet2 拿取所有 class
 group_data = sheet2.get_all_records()
 df_groups = pd.DataFrame(group_data)
 
 if not df_groups.empty and "username" in df_groups.columns:
-    # 篩選出該使用者的群組，並轉成清單 (使用 unique() 避免重複)
     all_class = (
         df_groups[df_groups["username"] == current_user]["class"].unique().tolist()
     )
 else:
     all_class = []
 
-# 2. 依照登入的帳號去 sheet1 拿取 stock_no, day_a, day_b, day_c
 records = sheet1.get_all_records()
 df_records = pd.DataFrame(records)
 
 all_stock = {}
 
 if not df_records.empty and "username" in df_records.columns:
-    # 步驟 A: 先篩選出目前登入使用者的資料
     user_df = df_records[df_records["username"] == current_user]
-
-    # 步驟 B: 依照 'class' 分群處理
     for group_name, group_df in user_df.groupby("class"):
-        # 步驟 C: 將每一列轉成 [no, day_a, day_b, day_c] 的格式
+
         stock_list = group_df[["no", "day_a", "day_b", "day_c"]].values.tolist()
 
-        # 強制轉型：確保 no 是字串，天數是整數 (避免從 Sheet 抓下來型別混亂)
         clean_stock_list = [
             [
                 str((str(item[0]).split(".")[0]).zfill(4)),
@@ -400,32 +377,22 @@ if not df_records.empty and "username" in df_records.columns:
             for item in stock_list
         ]
 
-        # 存入字典
         all_stock[group_name] = clean_stock_list
 else:
     all_stock = {}
-# all_class = ["A", "B"]
-# all_stock = {
-#     "A": [["2330", 5, 20, 60], ["0053", 5, 10, 15]],
-#     "B": [["0050", 8, 25, 68]],
-# }
+
 print(f"all_class:{all_class}")
 print(f"all_stock:{all_stock}")
-# ======================
-# 5. 核心動態更新區域
-# ======================
-# placeholder = st.empty()
+
 
 st_autorefresh(interval=10000, key="datarefresh")
-# while True:
-# with placeholder.container():
+
 with st.container():
-    # 按照 all_class 列表順序取出群組
+
     for group in all_class:
         if group in all_stock:
-            st.markdown(f"## 📁 {group}")  # 顯示群組名稱標題
+            st.markdown(f"## 📁 {group}")
 
-            # 取出該群組內的所有股票設定
             for config in all_stock[group]:
                 user_stock, day_a, day_b, day_c = config
 
@@ -434,7 +401,6 @@ with st.container():
                 realtime = get_realtime_info(user_stock)
 
                 if history_data and realtime:
-                    # --- 算法邏輯 (完全保留) ---
                     prices = [item["收盤價"] for item in history_data]
                     volumes = [item["成交股數"] / 1000 for item in history_data]
 
@@ -467,7 +433,6 @@ with st.container():
                         "highlight-purple" if vol_ratio >= 200 else "normal-white"
                     )
 
-                    # --- HTML 寫法 (照原本的，不多做結構改動) ---
                     html_code = f"""
                         <table class="custom-table">
                             <thead>
