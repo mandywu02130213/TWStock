@@ -57,43 +57,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# hide_streamlit_style = """
-#             <style>
-#             #MainMenu {visibility: hidden;}
-#             footer {visibility: hidden;}
-#             header {visibility: hidden;}
-#             </style>
-#             """
-# st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-# st.markdown(
-#     """
-#     <style>
-#     #MainMenu {visibility: hidden;}
-#     header {visibility: hidden;}
-#     footer {visibility: hidden !important;}
-
-#     [data-testid="stStatusWidget"] {display: none !important;}
-#     .viewerBadge_container__1QS1n {display: none !important;}
-#     .stAppDeployButton {display: none !important;}
-
-#     [data-testid="stAppViewContainer"] { background-color: #000000; }
-#     .stock-up { color: #FF3333 !important; font-weight: bold; }
-#     .stock-down { color: #00FF00 !important; font-weight: bold; }
-#     .stock-none { color: #FFFFFF !important; }
-#     .highlight-gold { color: #FFD700 !important; font-weight: bold; }
-#     .highlight-purple { color: #FF00FF !important; font-weight: bold; }
-#     .normal-white { color: #FFFFFF !important; }
-#     .custom-table {
-#         width: 100%; border-collapse: collapse; background-color: #111111;
-#         color: white; font-family: 'Consolas', monospace; margin-bottom: 20px;
-#     }
-#     .custom-table th { background-color: #003366; color: #FFFF00; padding: 10px; border: 1px solid #444; font-size: 14px; }
-#     .custom-table td { padding: 18px 10px; border: 1px solid #444; text-align: center; font-size: 22px; font-weight: bold; }
-#     </style>
-#     """,
-#     unsafe_allow_html=True,
-# )
-
 
 def init_connection():
     scope = [
@@ -158,7 +121,7 @@ with st.sidebar:
         day_a = st.number_input("天數 A (day_a)", min_value=1, value=5)
         day_b = st.number_input("天數 B (day_b)", min_value=1, value=20)
         day_c = st.number_input("天數 C (day_c)", min_value=1, value=60)  # 新增 day_c
-        submitted = st.form_submit_button("💾 永久儲存至雲端", use_container_width=True)
+        submitted = st.form_submit_button("💾 儲存", use_container_width=True)
 
 if submitted:
     if not user_groups:
