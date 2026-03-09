@@ -13,7 +13,7 @@ from FinMind.data import DataLoader
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # FinMind 設定
-FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMy0wOCAxNDoxNDowNyIsInVzZXJfaWQiOiJtYW5keXd1MDIxMyIsImVtYWlsIjoibWFuZHl3dTAyMTMwMjEzQGdtYWlsLmNvbSIsImlwIjoiMjIwLjEyOS43LjIzMiJ9.-RvP8EJfl_5oY1iwh2sXvzWD2wRXGNpnLJZGLceOyBI"
+FINMIND_TOKEN = st.secrets["finmind"]["token"]
 dl = DataLoader()
 dl.login_by_token(api_token=FINMIND_TOKEN)
 
@@ -74,7 +74,8 @@ def init_connection():
     return client
 
 client = init_connection()
-spreadsheet = client.open_by_key("10Oz6imH-bywS6sk23HquvgUw-3rKHLMU4g8MCC8ek-M")
+GSHEET_KEY = st.secrets["gspread"]["sheet_key"]
+spreadsheet = client.open_by_key(GSHEET_KEY)
 sheet1 = spreadsheet.get_worksheet(0) 
 sheet2 = spreadsheet.get_worksheet(1) 
 
@@ -142,6 +143,7 @@ def delete_stock_confirm(stock_no, current_user):
 
 @st.cache_data(ttl=3600)
 def get_history_finmind(stock_no, days):
+    # 抓取稍多天數確保過濾假日後天數足夠
     start_date = (datetime.now() - timedelta(days=days*3)).strftime("%Y-%m-%d")
     df = dl.taiwan_stock_daily(stock_id=stock_no, start_date=start_date)
     if df.empty: return None
@@ -206,53 +208,67 @@ def update_stock_tables():
                 stock_no = str(row['no']).split('.')[0].zfill(4)
                 day_a, day_b, day_c = int(row['day_a']), int(row['day_b']), int(row['day_c'])
                 
-                # 抓取歷史資料
-                hist = get_history_finmind(stock_no, max(day_a, day_b, day_c, 5))
+                # 為了計算 MA 與成交量，固定抓取足夠天數
+                max_d = max(day_a, day_b, day_c, 5)
+                hist = get_history_finmind(stock_no, max_d)
                 real = get_realtime_twse(stock_no)
                 
                 if not hist or not real: continue
 
-                # --- 判定市場狀態 ---
-                market_open = is_market_open()
-                has_today_data = (real["volume"] > 0)
+                # 取得歷史資料
                 fm_prices = hist["prices"]
                 fm_vols = hist["volumes"]
-                price_now = real["price"]
-                vol_now = real["volume"]
-
-                # --- 均線與均量計算邏輯 (MA A, B, C & MV5) ---
-                def calc_dynamic_ma(n, hist_list, current_val):
-                    if market_open or (not market_open and has_today_data):
-                        # 模式 1 & 2: (前 n-1 日 + 今日)/n
-                        prev_vals = hist_list[-(n-1):]
-                        ma_val = (sum(prev_vals) + current_val) / n
-                        formula = f"({'+'.join(map(str, prev_vals))}+{current_val})/{n}"
-                    else:
-                        # 模式 3: (前 n 日)/n
-                        last_n = hist_list[-n:]
-                        ma_val = sum(last_n) / n
-                        formula = f"({'+'.join(map(str, last_n))})/{n}"
-                    return ma_val, formula
-
-                ma_a, formula_a = calc_dynamic_ma(day_a, fm_prices, price_now)
-                ma_b, formula_b = calc_dynamic_ma(day_b, fm_prices, price_now)
-                ma_c, formula_c = calc_dynamic_ma(day_c, fm_prices, price_now)
-                mv5_custom, formula_v = calc_dynamic_ma(5, fm_vols, vol_now)
-
-                # 終端機 Debug 輸出
-                print(f"--- {stock_no} 計算檢查 ---")
-                print(f"MA_{day_a}: {formula_a} = {ma_a:.2f}")
-                print(f"MV5: {formula_v} = {mv5_custom:.2f}")
-
-                # 漲跌指標
-                diff = real["price"] - real["yesterday_close"]
-                diff_pct = (diff / real["yesterday_close"] * 100) if real["yesterday_close"] != 0 else 0
-                price_ma_diff = ((real["price"] - ma_a) / ma_a * 100) if ma_a != 0 else 0
                 
-                # 預估量與量增比
+                # 判定市場狀態
+                market_open = is_market_open()
+                has_today_data = (real["volume"] > 0)
+                current_price = real["price"]
+                current_vol = real["volume"]
+
+                # --- 均線 (MA) 與 5日均量 (MV5) 核心邏輯修改 ---
+                def calculate_ma_custom(n, prices, cur_p, is_open, has_data):
+                    if is_open or has_data:
+                        # 1 & 2. 開盤中或今日有開盤：(前 n-1 日 + 現在/今日價) / n
+                        last_n_minus_1 = prices[-(n-1):] if n > 1 else []
+                        ma_val = (sum(last_n_minus_1) + cur_p) / n
+                        debug_ma = f"({'+'.join(map(str, last_n_minus_1))}+{cur_p})/{n}"
+                    else:
+                        # 3. 假日或無交易：(前 n 日) / n
+                        last_n = prices[-n:]
+                        ma_val = sum(last_n) / n
+                        debug_ma = f"({'+'.join(map(str, last_n))})/{n}"
+                    return ma_val, debug_ma
+
+                # 計算 MA A, B, C
+                ma_a, dbg_ma_a = calculate_ma_custom(day_a, fm_prices, current_price, market_open, has_today_data)
+                ma_b, dbg_ma_b = calculate_ma_custom(day_b, fm_prices, current_price, market_open, has_today_data)
+                ma_c, dbg_ma_c = calculate_ma_custom(day_c, fm_prices, current_price, market_open, has_today_data)
+
+                # 計算 5日均量 (MV5)
+                if market_open or has_today_data:
+                    last_4_v = fm_vols[-4:]
+                    mv5_custom = (sum(last_4_v) + current_vol) / 5
+                    dbg_mv5 = f"({'+'.join(map(str, last_4_v))}+{current_vol})/5"
+                    formula_type = "即時/盤後"
+                else:
+                    last_5_v = fm_vols[-5:]
+                    mv5_custom = sum(last_5_v) / 5
+                    dbg_mv5 = f"({'+'.join(map(str, last_5_v))})/5"
+                    formula_type = "假日/無開盤"
+
+                # 終端機輸出檢查 (包含 MA A 算式作為代表)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 股票: {stock_no} | 模式: {formula_type}")
+                print(f"  > MA A ({day_a}日) 算式: {dbg_ma_a} = {ma_a:.2f}")
+                print(f"  > MV5 (5日均量) 算式: {dbg_mv5} = {mv5_custom:.2f}")
+
+                # 其它指標
+                diff = current_price - real["yesterday_close"]
+                diff_pct = (diff / real["yesterday_close"] * 100) if real["yesterday_close"] != 0 else 0
+                price_ma_diff = ((current_price - ma_a) / ma_a * 100) if ma_a != 0 else 0
+                
                 curr_t = datetime.now().strftime("%H:%M")
                 factor = get_est_factor(curr_t)
-                est_vol = vol_now * factor
+                est_vol = current_vol * factor
                 vol_ratio = (est_vol / mv5_custom) if mv5_custom > 0 else 0
 
                 if vol_ratio > 2.0 or price_ma_diff < 5.0:
@@ -266,7 +282,7 @@ def update_stock_tables():
                 all_rows.append({
                     "1.代號": stock_no, 
                     "2.名稱": real["name"], 
-                    "3.成交價": fmt(real["price"]), 
+                    "3.成交價": fmt(current_price), 
                     "4.漲跌(%)": f"{diff:g} ({diff_pct:.2f}%)", 
                     "5.線價比": f"{price_ma_diff:.2f}%", 
                     "6.均線A": fmt(round(ma_a, 2)), 
@@ -275,7 +291,7 @@ def update_stock_tables():
                     "9.天數B": day_b, 
                     "10.均線C": fmt(round(ma_c, 2)), 
                     "11.天數C": day_c, 
-                    "12.成交張數": int(vol_now), 
+                    "12.成交張數": int(current_vol), 
                     "13.量增比": f"{vol_ratio:.2f}", 
                     "14.五日均量": fmt(round(mv5_custom, 2)), 
                     "15.預估量": int(round(est_vol, 0))
