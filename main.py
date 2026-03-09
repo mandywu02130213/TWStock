@@ -8,9 +8,13 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 import urllib3
 from FinMind.data import DataLoader
+import pytz  # 新增時區處理模組
 
 # 關閉不安全請求警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# 定義台灣時區
+tw_tz = pytz.timezone('Asia/Taipei')
 
 # FinMind 設定
 FINMIND_TOKEN = st.secrets["finmind"]["token"]
@@ -41,7 +45,7 @@ def get_est_factor(time_str):
     return 1.0
 
 def is_market_open():
-    now = datetime.now()
+    now = datetime.now(tw_tz)  # 使用台灣時間
     if now.weekday() < 5 and "09:00" <= now.strftime("%H:%M") <= "13:35":
         return True
     return False
@@ -111,7 +115,7 @@ with st.sidebar:
 if submitted and stock_no:
     records = sheet1.get_all_records()
     df_existing = pd.DataFrame(records)
-    now_time = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_time = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M:%S")  # 使用台灣時間
     existing_row_index = None
     if not df_existing.empty:
         match = df_existing[(df_existing["username"] == current_user) & (df_existing["no"].astype(str) == str(stock_no))]
@@ -144,7 +148,7 @@ def delete_stock_confirm(stock_no, current_user):
 @st.cache_data(ttl=3600)
 def get_history_finmind(stock_no, days):
     # 抓取稍多天數確保過濾假日後天數足夠
-    start_date = (datetime.now() - timedelta(days=days*3)).strftime("%Y-%m-%d")
+    start_date = (datetime.now(tw_tz) - timedelta(days=days*3)).strftime("%Y-%m-%d")
     df = dl.taiwan_stock_daily(stock_id=stock_no, start_date=start_date)
     if df.empty: return None
     df = df.tail(days)
@@ -208,43 +212,35 @@ def update_stock_tables():
                 stock_no = str(row['no']).split('.')[0].zfill(4)
                 day_a, day_b, day_c = int(row['day_a']), int(row['day_b']), int(row['day_c'])
                 
-                # 為了計算 MA 與成交量，固定抓取足夠天數
                 max_d = max(day_a, day_b, day_c, 5)
                 hist = get_history_finmind(stock_no, max_d)
                 real = get_realtime_twse(stock_no)
                 
                 if not hist or not real: continue
 
-                # 取得歷史資料
                 fm_prices = hist["prices"]
                 fm_vols = hist["volumes"]
                 
-                # 判定市場狀態
                 market_open = is_market_open()
                 has_today_data = (real["volume"] > 0)
                 current_price = real["price"]
                 current_vol = real["volume"]
 
-                # --- 均線 (MA) 與 5日均量 (MV5) 核心邏輯修改 ---
                 def calculate_ma_custom(n, prices, cur_p, is_open, has_data):
                     if is_open or has_data:
-                        # 1 & 2. 開盤中或今日有開盤：(前 n-1 日 + 現在/今日價) / n
                         last_n_minus_1 = prices[-(n-1):] if n > 1 else []
                         ma_val = (sum(last_n_minus_1) + cur_p) / n
                         debug_ma = f"({'+'.join(map(str, last_n_minus_1))}+{cur_p})/{n}"
                     else:
-                        # 3. 假日或無交易：(前 n 日) / n
                         last_n = prices[-n:]
                         ma_val = sum(last_n) / n
                         debug_ma = f"({'+'.join(map(str, last_n))})/{n}"
                     return ma_val, debug_ma
 
-                # 計算 MA A, B, C
                 ma_a, dbg_ma_a = calculate_ma_custom(day_a, fm_prices, current_price, market_open, has_today_data)
                 ma_b, dbg_ma_b = calculate_ma_custom(day_b, fm_prices, current_price, market_open, has_today_data)
                 ma_c, dbg_ma_c = calculate_ma_custom(day_c, fm_prices, current_price, market_open, has_today_data)
 
-                # 計算 5日均量 (MV5)
                 if market_open or has_today_data:
                     last_4_v = fm_vols[-4:]
                     mv5_custom = (sum(last_4_v) + current_vol) / 5
@@ -256,17 +252,15 @@ def update_stock_tables():
                     dbg_mv5 = f"({'+'.join(map(str, last_5_v))})/5"
                     formula_type = "假日/無開盤"
 
-                # 終端機輸出檢查 (包含 MA A 算式作為代表)
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 股票: {stock_no} | 模式: {formula_type}")
+                print(f"[{datetime.now(tw_tz).strftime('%H:%M:%S')}] 股票: {stock_no} | 模式: {formula_type}")
                 print(f"  > MA A ({day_a}日) 算式: {dbg_ma_a} = {ma_a:.2f}")
                 print(f"  > MV5 (5日均量) 算式: {dbg_mv5} = {mv5_custom:.2f}")
 
-                # 其它指標
                 diff = current_price - real["yesterday_close"]
                 diff_pct = (diff / real["yesterday_close"] * 100) if real["yesterday_close"] != 0 else 0
                 price_ma_diff = ((current_price - ma_a) / ma_a * 100) if ma_a != 0 else 0
                 
-                curr_t = datetime.now().strftime("%H:%M")
+                curr_t = datetime.now(tw_tz).strftime("%H:%M")  # 使用台灣時間
                 factor = get_est_factor(curr_t)
                 est_vol = current_vol * factor
                 vol_ratio = (est_vol / mv5_custom) if mv5_custom > 0 else 0
@@ -310,6 +304,7 @@ def update_stock_tables():
         with alert_container:
             st.error(f"🚨 異常監控警示 (量增>2 或 線價<5%): {', '.join(alerts)}")
 
-    st.caption(f"最後更新時間：{datetime.now().strftime('%H:%M:%S')} {'(自動監控中)' if is_market_open() else '(非交易時段)'}")
+    # 底部狀態列更新時間改為台灣時間
+    st.caption(f"最後更新時間：{datetime.now(tw_tz).strftime('%H:%M:%S')} {'(自動監控中)' if is_market_open() else '(非交易時段)'}")
 
 update_stock_tables()
