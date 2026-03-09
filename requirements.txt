@@ -6,3 +6,4 @@ requests
 beautifulsoup4
 streamlit-autorefresh
 FinMind
+tqdm
