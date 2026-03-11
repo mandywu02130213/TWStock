@@ -157,6 +157,10 @@ def get_history_finmind(stock_no, days):
 def get_realtime_twse(stock_no):
     try:
         ts = int(time.time() * 1000)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://mis.twse.com.tw/"
+        }
         for prefix in ["tse", "otc"]:
             url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
             resp = requests.get(url, timeout=5, verify=False)
