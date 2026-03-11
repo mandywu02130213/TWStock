@@ -247,9 +247,20 @@ def update_stock_tables():
                 max_d = max(day_a, day_b, day_c, 5)
                 hist = get_history_finmind(stock_no, max_d)
                 real = get_realtime_twse(stock_no)
-                if real is None:
-                    st.warning(f"無法取得 {stock_no} 的即時行情，請檢查 Logs")
-                if not hist or not real: continue
+                if not real:
+                    # 嘗試從歷史資料 hist 拿最後一筆收盤價當作參考
+                    if hist and len(hist["prices"]) > 0:
+                        real = {
+                            "name": f"{stock_no}(未連線)", 
+                            "price": hist["prices"][-1], 
+                            "volume": hist["volumes"][-1], 
+                            "yesterday_close": hist["prices"][-1]
+                        }
+                    else:
+                        continue # 如果連歷史資料都沒，才跳過
+                # if real is None:
+                #     st.warning(f"無法取得 {stock_no} 的即時行情，請檢查 Logs")
+                # if not hist or not real: continue
 
                 fm_prices = hist["prices"]
                 fm_vols = hist["volumes"]
