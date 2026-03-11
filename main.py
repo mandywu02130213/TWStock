@@ -155,44 +155,25 @@ def get_history_finmind(stock_no, days):
     return {"prices": df["close"].tolist(), "volumes": (df["Trading_Volume"] / 1000).tolist()}
 
 def get_realtime_twse(stock_no):
+    
     try:
-        # 抓最近 3 天，保證一定有資料
-        start_d = (datetime.now(tw_tz) - timedelta(days=3)).strftime("%Y-%m-%d")
-        df = dl.taiwan_stock_daily(stock_id=stock_no, start_date=start_d)
-        
-        if not df.empty:
-            # 拿到最後一筆資料
-            latest_row = df.iloc[-1]
-            # 拿到倒數第二筆資料（昨日收盤）
-            prev_row = df.iloc[-2] if len(df) > 1 else latest_row
-            
-            return {
-                "name": stock_no, # 這裡可填代號，或從試算表拿中文名
-                "price": float(latest_row["close"]),
-                "volume": int(latest_row["Trading_Volume"] / 1000),
-                "yesterday_close": float(prev_row["close"])
-            }
-    except Exception as e:
-        print(f"雲端連線失敗: {e}")
-    return None
-    # try:
-    #     ts = int(time.time() * 1000)
-    #     headers = {
-    #         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    #         "Referer": "https://mis.twse.com.tw/"
-    #     }
-    #     for prefix in ["tse", "otc"]:
-    #         url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
-    #         resp = requests.get(url, timeout=5, verify=False)
-    #         data = resp.json()
-    #         if data.get("msgArray"):
-    #             info = data["msgArray"][0]
-    #             z = info.get("z", "-")
-    #             y = float(info.get("y", 0))
-    #             price = float(z) if z != "-" and float(z) != 0 else float(info.get("b", "0").split("_")[0])
-    #             return {"name": info.get("n", ""), "price": price, "volume": int(info.get("v", 0)), "yesterday_close": y}
-    #     return None
-    # except: return None
+        ts = int(time.time() * 1000)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://mis.twse.com.tw/"
+        }
+        for prefix in ["tse", "otc"]:
+            url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
+            resp = requests.get(url, headers=headers, timeout=5, verify=False)
+            data = resp.json()
+            if data.get("msgArray"):
+                info = data["msgArray"][0]
+                z = info.get("z", "-")
+                y = float(info.get("y", 0))
+                price = float(z) if z != "-" and float(z) != 0 else float(info.get("b", "0").split("_")[0])
+                return {"name": info.get("n", ""), "price": price, "volume": int(info.get("v", 0)), "yesterday_close": y}
+        return None
+    except: return None
 
 def style_dataframe(df):
     def highlight_ratio(val):
@@ -207,229 +188,144 @@ refresh_rate = 10.0 if is_market_open() else None
 
 @st.fragment(run_every=refresh_rate)
 def update_stock_tables():
-    # st.write(f"伺服器判定台灣時間: {datetime.now(tw_tz).strftime('%Y-%m-%d %H:%M:%S')}")
-    # st.write("正在讀取試算表...") # 測試點 1
-    # s_data = sheet1.get_all_records()
-    # st.write(f"讀取到 {len(s_data)} 筆原始資料") # 測試點 2
-    # alert_container = st.container()
-    
-    # g_data = sheet2.get_all_records()
-    # df_g = pd.DataFrame(g_data)
-    # user_classes = df_g[df_g["username"] == current_user]["class"].unique().tolist() if not df_g.empty else []
-    
-    # s_data = sheet1.get_all_records()
-    # df_s = pd.DataFrame(s_data)
-    # user_stocks_df = df_s[df_s["username"] == current_user] if not df_s.empty else pd.DataFrame()
-
-    # if not user_classes:
-    #     st.info("請先在左側建立群組。")
-    #     return
-
-    # alerts = []
-    # tabs = st.tabs([f"📂 {c}" for c in user_classes])
-
-    # for i, group_name in enumerate(user_classes):
-    #     with tabs[i]:
-    #         group_stocks = user_stocks_df[user_stocks_df["class"] == group_name]
-    #         if group_stocks.empty:
-    #             st.write("此群組尚無股票。")
-    #             continue
-
-    #         all_rows = []
-    #         for _, row in group_stocks.iterrows():
-    #             stock_no = str(row['no']).split('.')[0].zfill(4)
-    #             day_a, day_b, day_c = int(row['day_a']), int(row['day_b']), int(row['day_c'])
-                
-    #             max_d = max(day_a, day_b, day_c, 5)
-    #             hist = get_history_finmind(stock_no, max_d)
-    #             real = get_realtime_twse(stock_no)
-    #             if not real:
-    #                 # 嘗試從歷史資料 hist 拿最後一筆收盤價當作參考
-    #                 if hist and len(hist["prices"]) > 0:
-    #                     real = {
-    #                         "name": f"{stock_no}(未連線)", 
-    #                         "price": hist["prices"][-1], 
-    #                         "volume": hist["volumes"][-1], 
-    #                         "yesterday_close": hist["prices"][-1]
-    #                     }
-    #                 else:
-    #                     continue # 如果連歷史資料都沒，才跳過
-    #             # if real is None:
-    #             #     st.warning(f"無法取得 {stock_no} 的即時行情，請檢查 Logs")
-    #             # if not hist or not real: continue
-
-    #             fm_prices = hist["prices"]
-    #             fm_vols = hist["volumes"]
-                
-    #             market_open = is_market_open()
-    #             has_today_data = (real["volume"] > 0)
-    #             current_price = real["price"]
-    #             current_vol = real["volume"]
-
-    #             def calculate_ma_custom(n, prices, cur_p, is_open, has_data):
-    #                 if is_open or has_data:
-    #                     last_n_minus_1 = prices[-(n-1):] if n > 1 else []
-    #                     ma_val = (sum(last_n_minus_1) + cur_p) / n
-    #                     debug_ma = f"({'+'.join(map(str, last_n_minus_1))}+{cur_p})/{n}"
-    #                 else:
-    #                     last_n = prices[-n:]
-    #                     ma_val = sum(last_n) / n
-    #                     debug_ma = f"({'+'.join(map(str, last_n))})/{n}"
-    #                 return ma_val, debug_ma
-
-    #             ma_a, dbg_ma_a = calculate_ma_custom(day_a, fm_prices, current_price, market_open, has_today_data)
-    #             ma_b, dbg_ma_b = calculate_ma_custom(day_b, fm_prices, current_price, market_open, has_today_data)
-    #             ma_c, dbg_ma_c = calculate_ma_custom(day_c, fm_prices, current_price, market_open, has_today_data)
-
-    #             if market_open or has_today_data:
-    #                 last_4_v = fm_vols[-4:]
-    #                 mv5_custom = (sum(last_4_v) + current_vol) / 5
-    #                 dbg_mv5 = f"({'+'.join(map(str, last_4_v))}+{current_vol})/5"
-    #                 formula_type = "即時/盤後"
-    #             else:
-    #                 last_5_v = fm_vols[-5:]
-    #                 mv5_custom = sum(last_5_v) / 5
-    #                 dbg_mv5 = f"({'+'.join(map(str, last_5_v))})/5"
-    #                 formula_type = "假日/無開盤"
-
-    #             print(f"[{datetime.now(tw_tz).strftime('%H:%M:%S')}] 股票: {stock_no} | 模式: {formula_type}")
-    #             print(f"  > MA A ({day_a}日) 算式: {dbg_ma_a} = {ma_a:.2f}")
-    #             print(f"  > MV5 (5日均量) 算式: {dbg_mv5} = {mv5_custom:.2f}")
-
-    #             diff = current_price - real["yesterday_close"]
-    #             diff_pct = (diff / real["yesterday_close"] * 100) if real["yesterday_close"] != 0 else 0
-    #             price_ma_diff = ((current_price - ma_a) / ma_a * 100) if ma_a != 0 else 0
-                
-    #             curr_t = datetime.now(tw_tz).strftime("%H:%M")  # 使用台灣時間
-    #             factor = get_est_factor(curr_t)
-    #             est_vol = current_vol * factor
-    #             vol_ratio = (est_vol / mv5_custom) if mv5_custom > 0 else 0
-
-    #             if vol_ratio > 2.0 or price_ma_diff < 5.0:
-    #                 alerts.append(f"{stock_no} {real['name']}")
-
-    #             def fmt(val):
-    #                 if isinstance(val, (int, float)):
-    #                     return f"{val:g}"
-    #                 return val
-
-    #             all_rows.append({
-    #                 "1.代號": stock_no, 
-    #                 "2.名稱": real["name"], 
-    #                 "3.成交價": fmt(current_price), 
-    #                 "4.漲跌(%)": f"{diff:g} ({diff_pct:.2f}%)", 
-    #                 "5.線價比": f"{price_ma_diff:.2f}%", 
-    #                 "6.均線A": fmt(round(ma_a, 2)), 
-    #                 "7.天數A": day_a, 
-    #                 "8.均線B": fmt(round(ma_b, 2)), 
-    #                 "9.天數B": day_b, 
-    #                 "10.均線C": fmt(round(ma_c, 2)), 
-    #                 "11.天數C": day_c, 
-    #                 "12.成交張數": int(current_vol), 
-    #                 "13.量增比": f"{vol_ratio:.2f}", 
-    #                 "14.五日均量": fmt(round(mv5_custom, 2)), 
-    #                 "15.預估量": int(round(est_vol, 0))
-    #             })
-
-    #         if all_rows:
-    #             st.dataframe(style_dataframe(pd.DataFrame(all_rows)), use_container_width=True, hide_index=True)
-    #             st.write("個股操作：")
-    #             cols = st.columns(min(len(all_rows), 8))
-    #             for idx, r in enumerate(all_rows):
-    #                 with cols[idx % 8]:
-    #                     if st.button(f"🗑️ {r['1.代號']}", key=f"del_{group_name}_{r['1.代號']}"):
-    #                         delete_stock_confirm(r['1.代號'], current_user)
-
-    # if alerts:
-    #     with alert_container:
-    #         st.error(f"🚨 異常監控警示 (量增>2 或 線價<5%): {', '.join(alerts)}")
-
-    # # 底部狀態列更新時間改為台灣時間
-    # st.caption(f"最後更新時間：{datetime.now(tw_tz).strftime('%H:%M:%S')} {'(自動監控中)' if is_market_open() else '(非交易時段)'}")
-    # 1. 診斷區：先確認最基礎的東西
-    st.write(f"🔍 診斷資訊 | 台灣時間: {datetime.now(tw_tz).strftime('%H:%M:%S')} | Token 長度: {len(FINMIND_TOKEN)}")
-    
+    st.write(f"伺服器判定台灣時間: {datetime.now(tw_tz).strftime('%Y-%m-%d %H:%M:%S')}")
+    st.write("正在讀取試算表...") # 測試點 1
     s_data = sheet1.get_all_records()
-    if not s_data:
-        st.error("❌ 試算表讀取失敗或為空")
-        return
-
-    df_s = pd.DataFrame(s_data)
-    user_stocks_df = df_s[df_s["username"] == current_user]
+    st.write(f"讀取到 {len(s_data)} 筆原始資料") # 測試點 2
+    alert_container = st.container()
     
-    # 2. 取得群組
     g_data = sheet2.get_all_records()
     df_g = pd.DataFrame(g_data)
     user_classes = df_g[df_g["username"] == current_user]["class"].unique().tolist() if not df_g.empty else []
+    
+    s_data = sheet1.get_all_records()
+    df_s = pd.DataFrame(s_data)
+    user_stocks_df = df_s[df_s["username"] == current_user] if not df_s.empty else pd.DataFrame()
 
     if not user_classes:
         st.info("請先在左側建立群組。")
         return
 
+    alerts = []
     tabs = st.tabs([f"📂 {c}" for c in user_classes])
+
     for i, group_name in enumerate(user_classes):
         with tabs[i]:
             group_stocks = user_stocks_df[user_stocks_df["class"] == group_name]
+            if group_stocks.empty:
+                st.write("此群組尚無股票。")
+                continue
+
             all_rows = []
-            
             for _, row in group_stocks.iterrows():
                 stock_no = str(row['no']).split('.')[0].zfill(4)
-                
-                # --- 強制診斷第一檔股票 ---
-                if i == 0 and not all_rows:
-                    st.write(f"正在嘗試抓取第一檔股票: {stock_no}...")
-                
-                # 這裡改用最原始的 daily 呼叫測試
-                try:
-                    # 抓 10 天確保絕對有資料
-                    test_df = dl.taiwan_stock_daily(stock_id=stock_no, start_date=(datetime.now(tw_tz)-timedelta(days=10)).strftime("%Y-%m-%d"))
-                    
-                    if test_df.empty:
-                        st.warning(f"⚠️ {stock_no} FinMind 回傳空表格 (可能 Token 權限問題)")
-                        continue
-                    
-                    # 成功拿到底層資料，手動構造 real 與 hist
-                    latest = test_df.iloc[-1]
-                    prev = test_df.iloc[-2] if len(test_df) > 1 else latest
-                    
-                    real = {
-                        "name": stock_no,
-                        "price": float(latest["close"]),
-                        "volume": int(latest["Trading_Volume"] / 1000),
-                        "yesterday_close": float(prev["close"])
-                    }
-                    
-                    # 計算 MA 需要的歷史資料
-                    hist = {
-                        "prices": test_df["close"].tolist(),
-                        "volumes": (test_df["Trading_Volume"] / 1000).tolist()
-                    }
-                    
-                except Exception as e:
-                    st.error(f"💥 {stock_no} 抓取噴錯: {str(e)}")
-                    continue
-
-                # --- 剩下的計算邏輯 (MA A, B, C...) ---
                 day_a, day_b, day_c = int(row['day_a']), int(row['day_b']), int(row['day_c'])
+                
+                max_d = max(day_a, day_b, day_c, 5)
+                hist = get_history_finmind(stock_no, max_d)
+                real = get_realtime_twse(stock_no)
+                if not real:
+                    # 嘗試從歷史資料 hist 拿最後一筆收盤價當作參考
+                    if hist and len(hist["prices"]) > 0:
+                        real = {
+                            "name": f"{stock_no}(未連線)", 
+                            "price": hist["prices"][-1], 
+                            "volume": hist["volumes"][-1], 
+                            "yesterday_close": hist["prices"][-1]
+                        }
+                    else:
+                        continue # 如果連歷史資料都沒，才跳過
+                # if real is None:
+                #     st.warning(f"無法取得 {stock_no} 的即時行情，請檢查 Logs")
+                # if not hist or not real: continue
+
                 fm_prices = hist["prices"]
+                fm_vols = hist["volumes"]
+                
+                market_open = is_market_open()
+                has_today_data = (real["volume"] > 0)
                 current_price = real["price"]
                 current_vol = real["volume"]
-                
-                # 直接套用你原本的 MA 算式 (簡化版測試)
-                ma_a = sum(fm_prices[-day_a:]) / day_a
+
+                def calculate_ma_custom(n, prices, cur_p, is_open, has_data):
+                    if is_open or has_data:
+                        last_n_minus_1 = prices[-(n-1):] if n > 1 else []
+                        ma_val = (sum(last_n_minus_1) + cur_p) / n
+                        debug_ma = f"({'+'.join(map(str, last_n_minus_1))}+{cur_p})/{n}"
+                    else:
+                        last_n = prices[-n:]
+                        ma_val = sum(last_n) / n
+                        debug_ma = f"({'+'.join(map(str, last_n))})/{n}"
+                    return ma_val, debug_ma
+
+                ma_a, dbg_ma_a = calculate_ma_custom(day_a, fm_prices, current_price, market_open, has_today_data)
+                ma_b, dbg_ma_b = calculate_ma_custom(day_b, fm_prices, current_price, market_open, has_today_data)
+                ma_c, dbg_ma_c = calculate_ma_custom(day_c, fm_prices, current_price, market_open, has_today_data)
+
+                if market_open or has_today_data:
+                    last_4_v = fm_vols[-4:]
+                    mv5_custom = (sum(last_4_v) + current_vol) / 5
+                    dbg_mv5 = f"({'+'.join(map(str, last_4_v))}+{current_vol})/5"
+                    formula_type = "即時/盤後"
+                else:
+                    last_5_v = fm_vols[-5:]
+                    mv5_custom = sum(last_5_v) / 5
+                    dbg_mv5 = f"({'+'.join(map(str, last_5_v))})/5"
+                    formula_type = "假日/無開盤"
+
+                print(f"[{datetime.now(tw_tz).strftime('%H:%M:%S')}] 股票: {stock_no} | 模式: {formula_type}")
+                print(f"  > MA A ({day_a}日) 算式: {dbg_ma_a} = {ma_a:.2f}")
+                print(f"  > MV5 (5日均量) 算式: {dbg_mv5} = {mv5_custom:.2f}")
+
+                diff = current_price - real["yesterday_close"]
+                diff_pct = (diff / real["yesterday_close"] * 100) if real["yesterday_close"] != 0 else 0
                 price_ma_diff = ((current_price - ma_a) / ma_a * 100) if ma_a != 0 else 0
                 
+                curr_t = datetime.now(tw_tz).strftime("%H:%M")  # 使用台灣時間
+                factor = get_est_factor(curr_t)
+                est_vol = current_vol * factor
+                vol_ratio = (est_vol / mv5_custom) if mv5_custom > 0 else 0
+
+                if vol_ratio > 2.0 or price_ma_diff < 5.0:
+                    alerts.append(f"{stock_no} {real['name']}")
+
+                def fmt(val):
+                    if isinstance(val, (int, float)):
+                        return f"{val:g}"
+                    return val
+
                 all_rows.append({
                     "1.代號": stock_no, 
-                    "2.名稱": "OK", 
-                    "3.成交價": current_price,
-                    "5.線價比": f"{price_ma_diff:.2f}%",
-                    "12.成交張數": current_vol
+                    "2.名稱": real["name"], 
+                    "3.成交價": fmt(current_price), 
+                    "4.漲跌(%)": f"{diff:g} ({diff_pct:.2f}%)", 
+                    "5.線價比": f"{price_ma_diff:.2f}%", 
+                    "6.均線A": fmt(round(ma_a, 2)), 
+                    "7.天數A": day_a, 
+                    "8.均線B": fmt(round(ma_b, 2)), 
+                    "9.天數B": day_b, 
+                    "10.均線C": fmt(round(ma_c, 2)), 
+                    "11.天數C": day_c, 
+                    "12.成交張數": int(current_vol), 
+                    "13.量增比": f"{vol_ratio:.2f}", 
+                    "14.五日均量": fmt(round(mv5_custom, 2)), 
+                    "15.預估量": int(round(est_vol, 0))
                 })
 
             if all_rows:
-                st.dataframe(pd.DataFrame(all_rows), use_container_width=True)
-            else:
-                st.write("此群組無資料，請確認 Log。")
+                st.dataframe(style_dataframe(pd.DataFrame(all_rows)), use_container_width=True, hide_index=True)
+                st.write("個股操作：")
+                cols = st.columns(min(len(all_rows), 8))
+                for idx, r in enumerate(all_rows):
+                    with cols[idx % 8]:
+                        if st.button(f"🗑️ {r['1.代號']}", key=f"del_{group_name}_{r['1.代號']}"):
+                            delete_stock_confirm(r['1.代號'], current_user)
+
+    if alerts:
+        with alert_container:
+            st.error(f"🚨 異常監控警示 (量增>2 或 線價<5%): {', '.join(alerts)}")
+
+    # 底部狀態列更新時間改為台灣時間
+    st.caption(f"最後更新時間：{datetime.now(tw_tz).strftime('%H:%M:%S')} {'(自動監控中)' if is_market_open() else '(非交易時段)'}")
 
 update_stock_tables()
