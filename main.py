@@ -155,7 +155,6 @@ def get_history_finmind(stock_no, days):
     return {"prices": df["close"].tolist(), "volumes": (df["Trading_Volume"] / 1000).tolist()}
 
 def get_realtime_twse(stock_no):
-    
     try:
         ts = int(time.time() * 1000)
         headers = {
