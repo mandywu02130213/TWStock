@@ -113,23 +113,37 @@ with st.sidebar:
         day_c = st.number_input("天數 C (day_c)", min_value=1, value=60)
         submitted = st.form_submit_button("💾 儲存", use_container_width=True)
     st.divider()
-    st.header("🗑️ 刪除股票")
+    st.header("🗑️ 移除股票")
     
-    # 讀取當前使用者的股票清單
-    del_records = sheet1.get_all_records()
-    df_del = pd.DataFrame(del_records)
-    user_del_stocks = df_del[df_del["username"] == current_user]["no"].astype(str).tolist() if not df_del.empty else []
-    
-    if user_del_stocks:
-        stock_to_delete = st.selectbox("選擇要刪除的股票", user_del_stocks, key="del_select")
-        if st.button("🗑️ 確認刪除", type="primary", use_container_width=True):
-            match = df_del[(df_del["username"] == current_user) & (df_del["no"].astype(str) == stock_to_delete)]
-            if not match.empty:
-                sheet1.delete_rows(match.index[0] + 2)
-                st.success(f"{stock_to_delete} 已刪除！")
-                st.rerun()
-    else:
-        st.write("目前無股票可刪除")
+    # 讓使用者先選群組，再選股票
+    if user_groups:
+        del_group = st.selectbox("選擇群組", user_groups, key="del_group_select")
+        
+        # 過濾出該群組的股票
+        records = sheet1.get_all_records()
+        df_all = pd.DataFrame(records)
+        target_stocks = df_all[(df_all["username"] == current_user) & (df_all["class"] == del_group)]
+        
+        if not target_stocks.empty:
+            # 建立顯示名稱清單
+            stock_list = target_stocks["no"].astype(str).tolist()
+            to_delete = st.selectbox("選擇要移除的股票", ["-- 請選擇 --"] + stock_list)
+            
+            if to_delete != "-- 請選擇 --":
+                if st.button("🔥 執行刪除", type="primary", use_container_width=True):
+                    # 執行刪除邏輯
+                    match = target_stocks[target_stocks["no"].astype(str) == to_delete]
+                    if not match.empty:
+                        # 計算在原始 sheet1 中的行號 (DataFrame index 從0開始，加2補回標題列與1-based)
+                        # 注意：這裡要從 df_all 找回正確的 index
+                        total_match = df_all[(df_all["username"] == current_user) & (df_all["no"].astype(str) == to_delete)]
+                        idx = total_match.index[0] + 2
+                        sheet1.delete_rows(int(idx))
+                        st.success(f"已移除 {to_delete}")
+                        time.sleep(1)
+                        st.rerun()
+        else:
+            st.caption("此群組目前無股票")
 
 if submitted and stock_no:
     records = sheet1.get_all_records()
