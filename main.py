@@ -156,29 +156,43 @@ def get_history_finmind(stock_no, days):
 
 def get_realtime_twse(stock_no):
     try:
-        # 取得今天日期
-        today = datetime.now(tw_tz).strftime("%Y-%m-%d")
+        ts = int(time.time() * 1000)
+        # 必須模擬完整的瀏覽器行為
+        headers = {
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Connection": "keep-alive",
+            "Host": "mis.twse.com.tw",
+            "Referer": "https://mis.twse.com.tw/stock/fibest.jsp",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        }
         
-        # 嘗試抓取 FinMind 的當日行情
-        # 注意：FinMind 免費版在盤中可能會有幾分鐘延遲，但比連不上證交所好
-        df = dl.taiwan_stock_daily(
-            stock_id=stock_no, 
-            start_date=today
-        )
-        
-        if not df.empty:
-            info = df.iloc[-1]
-            return {
-                "name": stock_no,  # FinMind API 通常不帶中文名，建議從 Sheet 拿
-                "price": float(info["close"]),
-                "volume": int(info["Trading_Volume"] / 1000), # 轉為張數
-                "yesterday_close": float(info["open"]) # 簡化處理
-            }
-        
-        # 如果今天還沒開盤或沒資料，抓最近一筆
+        # 建立一個 Session 來維持 Cookie (證交所有時會檢查 Cookie)
+        session = requests.Session()
+        # 先訪問首頁拿 Cookie
+        session.get("https://mis.twse.com.tw/stock/index.jsp", headers=headers, timeout=5)
+
+        for prefix in ["tse", "otc"]:
+            url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
+            resp = session.get(url, headers=headers, timeout=5)
+            data = resp.json()
+            
+            if data.get("msgArray"):
+                info = data["msgArray"][0]
+                z = info.get("z", "-")
+                y = float(info.get("y", 0))
+                # 處理盤中掛盤價
+                price = float(z) if z != "-" and float(z) != 0 else float(info.get("b", "0").split("_")[0])
+                return {
+                    "name": info.get("n", ""), 
+                    "price": price, 
+                    "volume": int(info.get("v", 0)), 
+                    "yesterday_close": y
+                }
         return None
     except Exception as e:
-        print(f"FinMind Realtime Error: {e}")
+        print(f"Error fetching {stock_no}: {e}")
         return None
     # try:
     #     ts = int(time.time() * 1000)
