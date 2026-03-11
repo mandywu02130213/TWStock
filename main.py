@@ -155,21 +155,50 @@ def get_history_finmind(stock_no, days):
     return {"prices": df["close"].tolist(), "volumes": (df["Trading_Volume"] / 1000).tolist()}
 
 def get_realtime_twse(stock_no):
-    ts = int(time.time()*1000)
+    try:
+        # 用 FinMind 抓當日即時資料
+        today = datetime.now(tw_tz).strftime("%Y-%m-%d")
+        df = dl.taiwan_stock_tick(stock_id=stock_no, date=today)
+        
+        if df is not None and not df.empty:
+            latest = df.iloc[-1]
+            
+            # 昨日收盤：從歷史日K抓
+            hist_df = dl.taiwan_stock_daily(
+                stock_id=stock_no,
+                start_date=(datetime.now(tw_tz) - timedelta(days=5)).strftime("%Y-%m-%d")
+            )
+            yesterday_close = float(hist_df.iloc[-2]["close"]) if len(hist_df) >= 2 else float(latest["close"])
+            
+            # 累計成交量（張）
+            total_vol = int(df["volume"].sum() / 1000)
+            
+            return {
+                "name": stock_no,
+                "price": float(latest["close"]),
+                "volume": total_vol,
+                "yesterday_close": yesterday_close
+            }
+        
+        # 盤前或假日：直接拿最近日K
+        hist_df = dl.taiwan_stock_daily(
+            stock_id=stock_no,
+            start_date=(datetime.now(tw_tz) - timedelta(days=5)).strftime("%Y-%m-%d")
+        )
+        if hist_df is not None and not hist_df.empty:
+            latest_day = hist_df.iloc[-1]
+            prev_day = hist_df.iloc[-2] if len(hist_df) >= 2 else latest_day
+            return {
+                "name": stock_no,
+                "price": float(latest_day["close"]),
+                "volume": int(latest_day["Trading_Volume"] / 1000),
+                "yesterday_close": float(prev_day["close"])
+            }
+        return None
+    except Exception as e:
+        print(f"FinMind 即時資料失敗 {stock_no}: {e}")
+        return None
 
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://mis.twse.com.tw/"
-    }
-
-    url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{stock_no}.tw&json=1&delay=0&_={ts}"
-
-    r = requests.get(url, headers=headers, timeout=5)
-
-    st.write("status:", r.status_code)
-    st.write("text:", r.text[:500])
-
-    return None
     # try:
 
     #     ts = int(time.time() * 1000)
