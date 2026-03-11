@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import urllib3
 from FinMind.data import DataLoader
 import pytz  # 新增時區處理模組
+import yfinance as yf
 
 # 關閉不安全請求警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -156,49 +157,25 @@ def get_history_finmind(stock_no, days):
 
 def get_realtime_twse(stock_no):
     try:
-        # 用 FinMind 抓當日即時資料
-        today = datetime.now(tw_tz).strftime("%Y-%m-%d")
-        df = dl.taiwan_stock_tick(stock_id=stock_no, date=today)
+        ticker = yf.Ticker(f"{stock_no}.TW")
+        info = ticker.fast_info
         
-        if df is not None and not df.empty:
-            latest = df.iloc[-1]
-            
-            # 昨日收盤：從歷史日K抓
-            hist_df = dl.taiwan_stock_daily(
-                stock_id=stock_no,
-                start_date=(datetime.now(tw_tz) - timedelta(days=5)).strftime("%Y-%m-%d")
-            )
-            yesterday_close = float(hist_df.iloc[-2]["close"]) if len(hist_df) >= 2 else float(latest["close"])
-            
-            # 累計成交量（張）
-            total_vol = int(df["volume"].sum() / 1000)
-            
-            return {
-                "name": stock_no,
-                "price": float(latest["close"]),
-                "volume": total_vol,
-                "yesterday_close": yesterday_close
-            }
+        price = info.last_price
+        yesterday_close = info.previous_close
+        volume = int(info.last_volume / 1000)  # 換算成張
         
-        # 盤前或假日：直接拿最近日K
-        hist_df = dl.taiwan_stock_daily(
-            stock_id=stock_no,
-            start_date=(datetime.now(tw_tz) - timedelta(days=5)).strftime("%Y-%m-%d")
-        )
-        if hist_df is not None and not hist_df.empty:
-            latest_day = hist_df.iloc[-1]
-            prev_day = hist_df.iloc[-2] if len(hist_df) >= 2 else latest_day
-            return {
-                "name": stock_no,
-                "price": float(latest_day["close"]),
-                "volume": int(latest_day["Trading_Volume"] / 1000),
-                "yesterday_close": float(prev_day["close"])
-            }
-        return None
+        if not price or price == 0:
+            raise ValueError("價格為空")
+        
+        return {
+            "name": stock_no,
+            "price": round(float(price), 2),
+            "volume": volume,
+            "yesterday_close": round(float(yesterday_close), 2)
+        }
     except Exception as e:
-        print(f"FinMind 即時資料失敗 {stock_no}: {e}")
+        print(f"Yahoo 即時資料失敗 {stock_no}: {e}")
         return None
-
     # try:
 
     #     ts = int(time.time() * 1000)
