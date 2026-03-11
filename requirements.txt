@@ -8,3 +8,4 @@ streamlit-autorefresh
 FinMind
 tqdm
 pytz
+yfinance
