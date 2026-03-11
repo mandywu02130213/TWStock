@@ -163,7 +163,7 @@ def get_realtime_twse(stock_no):
         }
         for prefix in ["tse", "otc"]:
             url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
-            resp = requests.get(url, headers=headers, timeout=5, verify=False)
+            resp = requests.get(url, headers=headers, timeout=5)
             data = resp.json()
             if data.get("msgArray"):
                 info = data["msgArray"][0]
