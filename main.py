@@ -112,6 +112,24 @@ with st.sidebar:
         day_b = st.number_input("天數 B (day_b)", min_value=1, value=20)
         day_c = st.number_input("天數 C (day_c)", min_value=1, value=60)
         submitted = st.form_submit_button("💾 儲存", use_container_width=True)
+    st.divider()
+    st.header("🗑️ 刪除股票")
+    
+    # 讀取當前使用者的股票清單
+    del_records = sheet1.get_all_records()
+    df_del = pd.DataFrame(del_records)
+    user_del_stocks = df_del[df_del["username"] == current_user]["no"].astype(str).tolist() if not df_del.empty else []
+    
+    if user_del_stocks:
+        stock_to_delete = st.selectbox("選擇要刪除的股票", user_del_stocks, key="del_select")
+        if st.button("🗑️ 確認刪除", type="primary", use_container_width=True):
+            match = df_del[(df_del["username"] == current_user) & (df_del["no"].astype(str) == stock_to_delete)]
+            if not match.empty:
+                sheet1.delete_rows(match.index[0] + 2)
+                st.success(f"{stock_to_delete} 已刪除！")
+                st.rerun()
+    else:
+        st.write("目前無股票可刪除")
 
 if submitted and stock_no:
     records = sheet1.get_all_records()
@@ -333,12 +351,7 @@ def update_stock_tables():
 
             if all_rows:
                 st.dataframe(style_dataframe(pd.DataFrame(all_rows)), use_container_width=True, hide_index=True)
-                st.write("個股操作：")
-                cols = st.columns(min(len(all_rows), 8))
-                for idx, r in enumerate(all_rows):
-                    with cols[idx % 8]:
-                        if st.button(f"🗑️ {r['1.代號']}", key=f"del_{group_name}_{r['1.代號']}"):
-                            delete_stock_confirm(r['1.代號'], current_user)
+
 
     if alerts:
         with alert_container:
