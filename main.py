@@ -155,38 +155,25 @@ def get_history_finmind(stock_no, days):
     return {"prices": df["close"].tolist(), "volumes": (df["Trading_Volume"] / 1000).tolist()}
 
 def get_realtime_twse(stock_no):
-    # 第一層：嘗試 FinMind 即時接口
     try:
-        df_real = dl.taiwan_stock_realtime(stock_id=stock_no)
-        if df_real is not None and not df_real.empty:
-            info = df_real.iloc[0]
-            # 判斷成交價是否為有效數字
-            if float(info.get("deal_price", 0)) > 0:
-                return {
-                    "name": stock_no, 
-                    "price": float(info["deal_price"]),
-                    "volume": int(info["volume"]),
-                    "yesterday_close": float(info["pre_close"])
-                }
-    except:
-        pass
-
-    # 第二層：如果即時接口失敗，嘗試抓取「今天的日線資料」
-    # (FinMind 的 daily 資料在盤中通常也會更新，只是慢幾分鐘)
-    try:
-        today_str = datetime.now(tw_tz).strftime("%Y-%m-%d")
-        df_today = dl.taiwan_stock_daily(stock_id=stock_no, start_date=today_str)
-        if df_today is not None and not df_today.empty:
-            info = df_today.iloc[-1]
+        # 抓最近 3 天，保證一定有資料
+        start_d = (datetime.now(tw_tz) - timedelta(days=3)).strftime("%Y-%m-%d")
+        df = dl.taiwan_stock_daily(stock_id=stock_no, start_date=start_d)
+        
+        if not df.empty:
+            # 拿到最後一筆資料
+            latest_row = df.iloc[-1]
+            # 拿到倒數第二筆資料（昨日收盤）
+            prev_row = df.iloc[-2] if len(df) > 1 else latest_row
+            
             return {
-                "name": stock_no,
-                "price": float(info["close"]),
-                "volume": int(info["Trading_Volume"] / 1000), # 轉為張
-                "yesterday_close": float(info["open"]) # 粗估開盤價
+                "name": stock_no, # 這裡可填代號，或從試算表拿中文名
+                "price": float(latest_row["close"]),
+                "volume": int(latest_row["Trading_Volume"] / 1000),
+                "yesterday_close": float(prev_row["close"])
             }
-    except:
-        pass
-
+    except Exception as e:
+        print(f"雲端連線失敗: {e}")
     return None
     # try:
     #     ts = int(time.time() * 1000)
