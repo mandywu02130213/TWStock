@@ -162,32 +162,12 @@ def get_realtime_twse(stock_no):
         "Referer": "https://mis.twse.com.tw/"
     }
 
-    for prefix in ["tse","otc"]:
+    url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{stock_no}.tw&json=1&delay=0&_={ts}"
 
-        url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
+    r = requests.get(url, headers=headers, timeout=5)
 
-        try:
-            r = requests.get(url,headers=headers,timeout=5)
-            data = r.json()
-
-            if not data["msgArray"]:
-                continue
-
-            info = data["msgArray"][0]
-
-            price = info["z"]
-            if price == "-" or price == "":
-                price = info["b"].split("_")[0]
-
-            return {
-                "name": info["n"],
-                "price": float(price),
-                "volume": int(info["v"]),
-                "yesterday_close": float(info["y"])
-            }
-
-        except Exception as e:
-            print("API error:",e)
+    st.write("status:", r.status_code)
+    st.write("text:", r.text[:500])
 
     return None
     # try:
