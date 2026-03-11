@@ -218,7 +218,8 @@ def update_stock_tables():
                 max_d = max(day_a, day_b, day_c, 5)
                 hist = get_history_finmind(stock_no, max_d)
                 real = get_realtime_twse(stock_no)
-                
+                if real is None:
+                    st.warning(f"無法取得 {stock_no} 的即時行情，請檢查 Logs")
                 if not hist or not real: continue
 
                 fm_prices = hist["prices"]
