@@ -155,53 +155,51 @@ def get_history_finmind(stock_no, days):
     return {"prices": df["close"].tolist(), "volumes": (df["Trading_Volume"] / 1000).tolist()}
 
 def get_realtime_twse(stock_no):
-    try:
-        ts = int(time.time() * 1000)
+    ts = int(time.time()*1000)
 
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://mis.twse.com.tw/"
-        }
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://mis.twse.com.tw/"
+    }
 
-        for prefix in ["tse", "otc"]:
-            url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
+    for prefix in ["tse","otc"]:
 
-            resp = requests.get(url, headers=headers, timeout=5)
+        url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
 
-            print("status:", resp.status_code)
-            print("text:", resp.text[:200])
+        try:
+            r = requests.get(url,headers=headers,timeout=5)
+            data = r.json()
 
-            data = resp.json()
+            if not data["msgArray"]:
+                continue
 
-            if data.get("msgArray"):
-                info = data["msgArray"][0]
+            info = data["msgArray"][0]
 
-                z = info.get("z", "-")
-                y = float(info.get("y", 0))
+            price = info["z"]
+            if price == "-" or price == "":
+                price = info["b"].split("_")[0]
 
-                price = float(z) if z != "-" and float(z) != 0 else float(info.get("b", "0").split("_")[0])
+            return {
+                "name": info["n"],
+                "price": float(price),
+                "volume": int(info["v"]),
+                "yesterday_close": float(info["y"])
+            }
 
-                return {
-                    "name": info.get("n", ""),
-                    "price": price,
-                    "volume": int(info.get("v", 0)),
-                    "yesterday_close": y
-                }
+        except Exception as e:
+            print("API error:",e)
 
-        return None
-
-    except Exception as e:
-        print("TWSE ERROR:", e)
-        return None
+    return None
     # try:
+
     #     ts = int(time.time() * 1000)
-    #     headers = {
-    #         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    #         "Referer": "https://mis.twse.com.tw/"
-    #     }
+    #     # headers = {
+    #     #     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    #     #     "Referer": "https://mis.twse.com.tw/"
+    #     # }
     #     for prefix in ["tse", "otc"]:
     #         url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
-    #         resp = requests.get(url, timeout=5, verify=False)
+    #         resp = requests.get(url,  timeout=5, verify=False)
     #         data = resp.json()
     #         if data.get("msgArray"):
     #             info = data["msgArray"][0]
