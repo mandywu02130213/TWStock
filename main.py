@@ -156,20 +156,29 @@ def get_history_finmind(stock_no, days):
 
 def get_realtime_twse(stock_no):
     try:
-        # 使用 FinMind 抓取當日成交資料（這在交易時間會更新）
+        # 取得今天日期
         today = datetime.now(tw_tz).strftime("%Y-%m-%d")
-        df = dl.taiwan_stock_daily(stock_id=stock_no, start_date=today)
+        
+        # 嘗試抓取 FinMind 的當日行情
+        # 注意：FinMind 免費版在盤中可能會有幾分鐘延遲，但比連不上證交所好
+        df = dl.taiwan_stock_daily(
+            stock_id=stock_no, 
+            start_date=today
+        )
         
         if not df.empty:
             info = df.iloc[-1]
             return {
-                "name": stock_no, # FinMind 回傳通常沒中文名，可從 sheet1 拿
+                "name": stock_no,  # FinMind API 通常不帶中文名，建議從 Sheet 拿
                 "price": float(info["close"]),
-                "volume": int(info["Trading_Volume"] / 1000), # 轉為張
-                "yesterday_close": float(info["open"]) # 或使用前一筆
+                "volume": int(info["Trading_Volume"] / 1000), # 轉為張數
+                "yesterday_close": float(info["open"]) # 簡化處理
             }
+        
+        # 如果今天還沒開盤或沒資料，抓最近一筆
         return None
-    except:
+    except Exception as e:
+        print(f"FinMind Realtime Error: {e}")
         return None
     # try:
     #     ts = int(time.time() * 1000)
