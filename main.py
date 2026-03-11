@@ -156,23 +156,39 @@ def get_history_finmind(stock_no, days):
 
 def get_realtime_twse(stock_no):
     try:
-        ts = int(time.time() * 1000)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://mis.twse.com.tw/"
-        }
-        for prefix in ["tse", "otc"]:
-            url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
-            resp = requests.get(url, timeout=5, verify=False)
-            data = resp.json()
-            if data.get("msgArray"):
-                info = data["msgArray"][0]
-                z = info.get("z", "-")
-                y = float(info.get("y", 0))
-                price = float(z) if z != "-" and float(z) != 0 else float(info.get("b", "0").split("_")[0])
-                return {"name": info.get("n", ""), "price": price, "volume": int(info.get("v", 0)), "yesterday_close": y}
+        # 使用 FinMind 抓取當日成交資料（這在交易時間會更新）
+        today = datetime.now(tw_tz).strftime("%Y-%m-%d")
+        df = dl.taiwan_stock_daily(stock_id=stock_no, start_date=today)
+        
+        if not df.empty:
+            info = df.iloc[-1]
+            return {
+                "name": stock_no, # FinMind 回傳通常沒中文名，可從 sheet1 拿
+                "price": float(info["close"]),
+                "volume": int(info["Trading_Volume"] / 1000), # 轉為張
+                "yesterday_close": float(info["open"]) # 或使用前一筆
+            }
         return None
-    except: return None
+    except:
+        return None
+    # try:
+    #     ts = int(time.time() * 1000)
+    #     headers = {
+    #         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    #         "Referer": "https://mis.twse.com.tw/"
+    #     }
+    #     for prefix in ["tse", "otc"]:
+    #         url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
+    #         resp = requests.get(url, timeout=5, verify=False)
+    #         data = resp.json()
+    #         if data.get("msgArray"):
+    #             info = data["msgArray"][0]
+    #             z = info.get("z", "-")
+    #             y = float(info.get("y", 0))
+    #             price = float(z) if z != "-" and float(z) != 0 else float(info.get("b", "0").split("_")[0])
+    #             return {"name": info.get("n", ""), "price": price, "volume": int(info.get("v", 0)), "yesterday_close": y}
+    #     return None
+    # except: return None
 
 def style_dataframe(df):
     def highlight_ratio(val):
