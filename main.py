@@ -220,6 +220,7 @@ refresh_rate = 10.0 if is_market_open() else None
 
 @st.fragment(run_every=refresh_rate)
 def update_stock_tables():
+    st.write(f"伺服器判定台灣時間: {datetime.now(tw_tz).strftime('%Y-%m-%d %H:%M:%S')}")
     st.write("正在讀取試算表...") # 測試點 1
     s_data = sheet1.get_all_records()
     st.write(f"讀取到 {len(s_data)} 筆原始資料") # 測試點 2
