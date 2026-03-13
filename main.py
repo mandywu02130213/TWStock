@@ -6,58 +6,22 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
+from streamlit_autorefresh import st_autorefresh
 import urllib3
-from FinMind.data import DataLoader
-import pytz  # 新增時區處理模組
-import yfinance as yf
 
-# 關閉不安全請求警告
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 定義台灣時區
-tw_tz = pytz.timezone('Asia/Taipei')
-
-# FinMind 設定
-FINMIND_TOKEN = st.secrets["finmind"]["token"]
-dl = DataLoader()
-dl.login_by_token(api_token=FINMIND_TOKEN)
-
-# 預估量因子
-EST_FACTORS = {
-    "09:05": 14.99, "09:10": 9.48, "09:15": 7.12, "09:20": 5.83, "09:25": 4.99,
-    "09:30": 4.42, "09:35": 3.99, "09:40": 3.66, "09:45": 3.39, "09:50": 3.18,
-    "09:55": 2.99, "10:00": 2.83, "10:05": 2.70, "10:10": 2.58, "10:15": 2.48,
-    "10:20": 2.39, "10:25": 2.30, "10:30": 2.23, "10:35": 2.15, "10:40": 2.09,
-    "10:45": 2.03, "10:50": 1.97, "10:55": 1.92, "11:00": 1.87, "11:05": 1.83,
-    "11:10": 1.79, "11:15": 1.74, "11:20": 1.71, "11:25": 1.67, "11:30": 1.63,
-    "11:35": 1.60, "11:40": 1.57, "11:45": 1.54, "11:50": 1.51, "11:55": 1.48,
-    "12:00": 1.46, "12:05": 1.43, "12:10": 1.41, "12:15": 1.38, "12:20": 1.36,
-    "12:25": 1.34, "12:30": 1.32, "12:35": 1.30, "12:40": 1.28, "12:45": 1.25,
-    "12:50": 1.23, "12:55": 1.21, "13:00": 1.19, "13:05": 1.17, "13:10": 1.14,
-    "13:15": 1.12, "13:20": 1.09, "13:25": 1.06, "13:30": 1.00,
-}
-
-def get_est_factor(time_str):
-    if time_str >= "13:30": return 1.0
-    keys = sorted(EST_FACTORS.keys())
-    if time_str < "09:05": return 14.99
-    for k in keys:
-        if time_str <= k: return EST_FACTORS[k]
-    return 1.0
-
-def is_market_open():
-    now = datetime.now(tw_tz)  # 使用台灣時間
-    if now.weekday() < 5 and "09:00" <= now.strftime("%H:%M") <= "13:35":
-        return True
-    return False
 
 def check_login():
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
+
     if not st.session_state.logged_in:
         st.subheader("🔐 系統登入")
         user_input = st.text_input("請輸入授權帳號", type="default")
         allowed_users = st.secrets["auth"]["allowed_users"]
+
         if st.button("進入系統"):
             if user_input in allowed_users:
                 st.session_state.logged_in = True
@@ -68,126 +32,179 @@ def check_login():
                 st.error("帳號錯誤，請聯繫管理員。")
         st.stop()
 
-st.set_page_config(page_title="台股 1-15 項極速監控", layout="wide")
+
 check_login()
+st.set_page_config(page_title="台股 1-15 項極速監控", layout="wide")
+
+st.markdown(
+    """
+    <style>
+    [data-testid="stAppViewContainer"] { background-color: #000000; }
+    .stock-up { color: #FF3333 !important; font-weight: bold; }
+    .stock-down { color: #00FF00 !important; font-weight: bold; }
+    .stock-none { color: #FFFFFF !important; }
+    .highlight-gold { color: #FFD700 !important; font-weight: bold; } /* 線價比 5% 內 */
+    .highlight-purple { color: #FF00FF !important; font-weight: bold; } /* 量增比 2倍以上 */
+    .normal-white { color: #FFFFFF !important; }
+    .custom-table {
+        width: 100%; border-collapse: collapse; background-color: #111111; color: white; font-family: 'Consolas', monospace;
+        margin-bottom: 20px;
+    }
+    .custom-table th { background-color: #003366; color: #FFFF00; padding: 10px; border: 1px solid #444; font-size: 14px; }
+    .custom-table td { padding: 18px 10px; border: 1px solid #444; text-align: center; font-size: 22px; font-weight: bold; }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
+
 
 def init_connection():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+    ]
+
     creds_dict = st.secrets["gcp_service_account"]
+
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    # creds = ServiceAccountCredentials.from_json_keyfile_name("creds.json", scope)
     client = gspread.authorize(creds)
     return client
 
+
 client = init_connection()
-GSHEET_KEY = st.secrets["gspread"]["sheet_key"]
-spreadsheet = client.open_by_key(GSHEET_KEY)
-sheet1 = spreadsheet.get_worksheet(0) 
-sheet2 = spreadsheet.get_worksheet(1) 
+spreadsheet = client.open_by_key("10Oz6imH-bywS6sk23HquvgUw-3rKHLMU4g8MCC8ek-M")
+sheet1 = spreadsheet.get_worksheet(0)
+sheet2 = spreadsheet.get_worksheet(1)
 
 current_user = st.session_state.current_user
 
 st.title("📈 股票參數永久保存系統")
 st.caption(f"當前使用者：{current_user}")
 
+
 with st.sidebar:
     if st.button("🚪 登出系統"):
         st.session_state.logged_in = False
         st.rerun()
+
     st.header("📂 群組管理")
     new_group_name = st.text_input("建立新群組名稱")
     if st.button("➕ 建立群組", use_container_width=True):
         if new_group_name:
+
             sheet2.append_row([current_user, new_group_name])
             st.success(f"群組 '{new_group_name}' 建立成功！")
             st.rerun()
+        else:
+            st.warning("請輸入群組名稱")
+
     st.divider()
+
     group_data = sheet2.get_all_records()
     df_groups = pd.DataFrame(group_data)
-    user_groups = df_groups[df_groups["username"] == current_user]["class"].tolist() if not df_groups.empty else []
+
+    if not df_groups.empty and "username" in df_groups.columns:
+        user_groups = df_groups[df_groups["username"] == current_user]["class"].tolist()
+    else:
+        user_groups = []
+
     st.header("⚙️ 參數設定")
     with st.form("input_form"):
         stock_no = st.text_input("股票代號 (No)")
-        category = st.selectbox("分類 (Class)", user_groups if user_groups else ["請先建立群組"], disabled=not user_groups)
+        category = st.selectbox(
+            "分類 (Class)",
+            user_groups if user_groups else ["請先建立群組"],
+            disabled=not user_groups,
+        )
+
         day_a = st.number_input("天數 A (day_a)", min_value=1, value=5)
         day_b = st.number_input("天數 B (day_b)", min_value=1, value=20)
-        day_c = st.number_input("天數 C (day_c)", min_value=1, value=60)
+        day_c = st.number_input("天數 C (day_c)", min_value=1, value=60)  # 新增 day_c
         submitted = st.form_submit_button("💾 儲存", use_container_width=True)
-    st.divider()
-    st.header("🗑️ 移除股票")
-    
-    # 讓使用者先選群組，再選股票
-    if user_groups:
-        del_group = st.selectbox("選擇群組", user_groups, key="del_group_select")
-        
-        # 過濾出該群組的股票
+
+if submitted:
+    if not user_groups:
+        st.sidebar.error("❌ 請先建立群組後再儲存！")
+    elif stock_no:
         records = sheet1.get_all_records()
-        df_all = pd.DataFrame(records)
-        target_stocks = df_all[(df_all["username"] == current_user) & (df_all["class"] == del_group)]
-        
-        if not target_stocks.empty:
-            # 建立顯示名稱清單
-            stock_list = target_stocks["no"].astype(str).tolist()
-            to_delete = st.selectbox("選擇要移除的股票", ["-- 請選擇 --"] + stock_list)
-            
-            if to_delete != "-- 請選擇 --":
-                if st.button("🔥 執行刪除", type="primary", use_container_width=True):
-                    # 執行刪除邏輯
-                    match = target_stocks[target_stocks["no"].astype(str) == to_delete]
-                    if not match.empty:
-                        # 計算在原始 sheet1 中的行號 (DataFrame index 從0開始，加2補回標題列與1-based)
-                        # 注意：這裡要從 df_all 找回正確的 index
-                        total_match = df_all[(df_all["username"] == current_user) & (df_all["no"].astype(str) == to_delete)]
-                        idx = total_match.index[0] + 2
-                        sheet1.delete_rows(int(idx))
-                        st.success(f"已移除 {to_delete}")
-                        time.sleep(1)
-                        st.rerun()
+        df_existing = pd.DataFrame(records)
+        now_time = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        existing_row_index = None
+        if not df_existing.empty:
+
+            match = df_existing[
+                (df_existing["username"] == current_user)
+                & (df_existing["no"].astype(str) == str(stock_no))
+            ]
+            if not match.empty:
+                existing_row_index = match.index[0]
+                old_day_a = match.iloc[0]["day_a"]
+                old_day_b = match.iloc[0]["day_b"]
+                old_day_c = match.iloc[0].get("day_c", 0)
+
+        if existing_row_index is not None:
+
+            if old_day_a == day_a and old_day_b == day_b and old_day_c == day_c:
+                st.sidebar.info(f"ℹ️ {stock_no} 參數相同，無需更新。")
+            else:
+
+                row_to_update = int(existing_row_index) + 2
+                sheet1.update_cell(row_to_update, 1, now_time)
+                sheet1.update_cell(row_to_update, 4, day_a)
+                sheet1.update_cell(row_to_update, 5, day_b)
+                sheet1.update_cell(row_to_update, 6, day_c)
+                sheet1.update_cell(row_to_update, 7, category)
+
+                st.sidebar.success(f"🔄 {stock_no} 的參數已更新！")
+                st.rerun()
         else:
-            st.caption("此群組目前無股票")
 
-if submitted and stock_no:
-    records = sheet1.get_all_records()
-    df_existing = pd.DataFrame(records)
-    now_time = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M:%S")  # 使用台灣時間
-    existing_row_index = None
-    if not df_existing.empty:
-        match = df_existing[(df_existing["username"] == current_user) & (df_existing["no"].astype(str) == str(stock_no))]
-        if not match.empty: existing_row_index = match.index[0]
-    if existing_row_index is not None:
-        row_to_update = int(existing_row_index) + 2
-        sheet1.update_cell(row_to_update, 1, now_time)
-        sheet1.update_cell(row_to_update, 4, day_a); sheet1.update_cell(row_to_update, 5, day_b); sheet1.update_cell(row_to_update, 6, day_c)
-        sheet1.update_cell(row_to_update, 7, category)
-        st.sidebar.success(f"🔄 {stock_no} 已更新！")
-        st.rerun()
-    else:
-        sheet1.append_row([now_time, current_user, stock_no, day_a, day_b, day_c, category])
-        st.sidebar.success(f"✅ {stock_no} 已新增！")
-        st.rerun()
-
-@st.dialog("確認刪除股票")
-def delete_stock_confirm(stock_no, current_user):
-    st.warning(f"確定要從清單中永久移除 {stock_no} 嗎？")
-    if st.button("確認移除", type="primary", use_container_width=True):
-        records = sheet1.get_all_records()
-        df = pd.DataFrame(records)
-        match = df[(df["username"] == current_user) & (df["no"].astype(str) == str(stock_no))]
-        if not match.empty:
-            sheet1.delete_rows(match.index[0] + 2)
-            st.success("已成功刪除！")
-            time.sleep(0.5)
+            new_row = [now_time, current_user, stock_no, day_a, day_b, day_c, category]
+            sheet1.append_row(new_row)
+            st.sidebar.success(f"✅ {stock_no} 已新增儲存！")
             st.rerun()
+    else:
+        st.sidebar.error("請填寫股票代號 (No)")
+
 
 @st.cache_data(ttl=3600)
-def get_history_finmind(stock_no, days):
-    # 抓取稍多天數確保過濾假日後天數足夠
-    start_date = (datetime.now(tw_tz) - timedelta(days=days*3)).strftime("%Y-%m-%d")
-    df = dl.taiwan_stock_daily(stock_id=stock_no, start_date=start_date)
-    if df.empty: return None
-    df = df.tail(days)
-    return {"prices": df["close"].tolist(), "volumes": (df["Trading_Volume"] / 1000).tolist()}
+def get_history_base(stock_no, max_count):
+    now = datetime.now()
+    current_date = now.replace(day=1)
+    all_data = []
 
-def get_realtime_twse(stock_no):
+    while len(all_data) < max_count + 5:
+        date_str = current_date.strftime("%Y%m%d")
+        url = f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date={date_str}&stockNo={stock_no}&response=html"
+        try:
+            resp = requests.get(url, timeout=10, verify=False)
+            soup = BeautifulSoup(resp.text, "html.parser")
+            table = soup.find("table")
+            if table:
+                rows = table.find_all("tr")[1:]
+                month_data = []
+                for row in rows:
+                    cols = [td.get_text(strip=True) for td in row.find_all("td")]
+                    if len(cols) >= 9:
+                        month_data.append(
+                            {
+                                "收盤價": float(cols[6].replace(",", "")),
+                                "成交股數": int(cols[1].replace(",", "")),
+                            }
+                        )
+                all_data = month_data + all_data
+            current_date = (current_date.replace(day=1) - timedelta(days=1)).replace(
+                day=1
+            )
+            time.sleep(0.3)
+        except:
+            break
+    return all_data
+
+
+def get_realtime_info(stock_no):
     try:
         timestamp = int(time.time() * 1000)
         url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{stock_no}.tw&json=1&delay=0&_={timestamp}"
@@ -218,171 +235,199 @@ def get_realtime_twse(stock_no):
         }
     except:
         return None
-    # try:
 
-    #     ts = int(time.time() * 1000)
-    #     # headers = {
-    #     #     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    #     #     "Referer": "https://mis.twse.com.tw/"
-    #     # }
-    #     for prefix in ["tse", "otc"]:
-    #         url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={prefix}_{stock_no}.tw&json=1&delay=0&_={ts}"
-    #         resp = requests.get(url,  timeout=5, verify=False)
-    #         data = resp.json()
-    #         if data.get("msgArray"):
-    #             info = data["msgArray"][0]
-    #             z = info.get("z", "-")
-    #             y = float(info.get("y", 0))
-    #             price = float(z) if z != "-" and float(z) != 0 else float(info.get("b", "0").split("_")[0])
-    #             return {"name": info.get("n", ""), "price": price, "volume": int(info.get("v", 0)), "yesterday_close": y}
-    #     return None
-    # except: return None
 
-def style_dataframe(df):
-    def highlight_ratio(val):
-        try:
-            num = float(str(val).replace('%', ''))
-            return 'background-color: #ffcccc; color: black; font-weight: bold' if num < 5.0 else ''
-        except: return ''
-    return df.style.applymap(highlight_ratio, subset=['5.線價比'])
+EST_FACTORS = {
+    "09:05": 14.99,
+    "09:10": 9.48,
+    "09:15": 7.12,
+    "09:20": 5.83,
+    "09:25": 4.99,
+    "09:30": 4.42,
+    "09:35": 3.99,
+    "09:40": 3.66,
+    "09:45": 3.39,
+    "09:50": 3.18,
+    "09:55": 2.99,
+    "10:00": 2.83,
+    "10:05": 2.70,
+    "10:10": 2.58,
+    "10:15": 2.48,
+    "10:20": 2.39,
+    "10:25": 2.30,
+    "10:30": 2.23,
+    "10:35": 2.15,
+    "10:40": 2.09,
+    "10:45": 2.03,
+    "10:50": 1.97,
+    "10:55": 1.92,
+    "11:00": 1.87,
+    "11:05": 1.83,
+    "11:10": 1.79,
+    "11:15": 1.74,
+    "11:20": 1.71,
+    "11:25": 1.67,
+    "11:30": 1.63,
+    "11:35": 1.60,
+    "11:40": 1.57,
+    "11:45": 1.54,
+    "11:50": 1.51,
+    "11:55": 1.48,
+    "12:00": 1.46,
+    "12:05": 1.43,
+    "12:10": 1.41,
+    "12:15": 1.38,
+    "12:20": 1.36,
+    "12:25": 1.34,
+    "12:30": 1.32,
+    "12:35": 1.30,
+    "12:40": 1.28,
+    "12:45": 1.25,
+    "12:50": 1.23,
+    "12:55": 1.21,
+    "13:00": 1.19,
+    "13:05": 1.17,
+    "13:10": 1.14,
+    "13:15": 1.12,
+    "13:20": 1.09,
+    "13:25": 1.06,
+    "13:30": 1.00,
+}
 
-# --- 主畫面更新邏輯 ---
-refresh_rate = 10.0 if is_market_open() else None
 
-@st.fragment(run_every=refresh_rate)
-def update_stock_tables():
-    s_data = sheet1.get_all_records()
-    st.write(f"讀取到 {len(s_data)} 筆原始資料") # 測試點 2
-    alert_container = st.container()
-    
-    g_data = sheet2.get_all_records()
-    df_g = pd.DataFrame(g_data)
-    user_classes = df_g[df_g["username"] == current_user]["class"].unique().tolist() if not df_g.empty else []
-    
-    s_data = sheet1.get_all_records()
-    df_s = pd.DataFrame(s_data)
-    user_stocks_df = df_s[df_s["username"] == current_user] if not df_s.empty else pd.DataFrame()
+def get_est_factor(current_time_str):
+    keys = sorted(EST_FACTORS.keys())
+    factor = 1.0
+    for k in keys:
+        if current_time_str <= k:
+            factor = EST_FACTORS[k]
+            break
+    if current_time_str > "13:30":
+        factor = 1.0
+    if current_time_str < "09:05":
+        factor = 14.99
+    return factor
 
-    if not user_classes:
-        st.info("請先在左側建立群組。")
-        return
 
-    alerts = []
-    tabs = st.tabs([f"📂 {c}" for c in user_classes])
+group_data = sheet2.get_all_records()
+df_groups = pd.DataFrame(group_data)
 
-    for i, group_name in enumerate(user_classes):
-        with tabs[i]:
-            group_stocks = user_stocks_df[user_stocks_df["class"] == group_name]
-            if group_stocks.empty:
-                st.write("此群組尚無股票。")
-                continue
+if not df_groups.empty and "username" in df_groups.columns:
+    all_class = (
+        df_groups[df_groups["username"] == current_user]["class"].unique().tolist()
+    )
+else:
+    all_class = []
 
-            all_rows = []
-            for _, row in group_stocks.iterrows():
-                stock_no = str(row['no']).split('.')[0].zfill(4)
-                day_a, day_b, day_c = int(row['day_a']), int(row['day_b']), int(row['day_c'])
-                
-                max_d = max(day_a, day_b, day_c, 5)
-                hist = get_history_finmind(stock_no, max_d)
-                real = get_realtime_twse(stock_no)
-                if not real:
-                    # 嘗試從歷史資料 hist 拿最後一筆收盤價當作參考
-                    if hist and len(hist["prices"]) > 0:
-                        real = {
-                            "name": f"{stock_no}(未連線)", 
-                            "price": hist["prices"][-1], 
-                            "volume": hist["volumes"][-1], 
-                            "yesterday_close": hist["prices"][-1]
-                        }
-                    else:
-                        continue # 如果連歷史資料都沒，才跳過
-                # if real is None:
-                #     st.warning(f"無法取得 {stock_no} 的即時行情，請檢查 Logs")
-                # if not hist or not real: continue
+records = sheet1.get_all_records()
+df_records = pd.DataFrame(records)
 
-                fm_prices = hist["prices"]
-                fm_vols = hist["volumes"]
-                
-                market_open = is_market_open()
-                has_today_data = (real["volume"] > 0)
-                current_price = real["price"]
-                current_vol = real["volume"]
+all_stock = {}
 
-                def calculate_ma_custom(n, prices, cur_p, is_open, has_data):
-                    if is_open or has_data:
-                        last_n_minus_1 = prices[-(n-1):] if n > 1 else []
-                        ma_val = (sum(last_n_minus_1) + cur_p) / n
-                        debug_ma = f"({'+'.join(map(str, last_n_minus_1))}+{cur_p})/{n}"
-                    else:
-                        last_n = prices[-n:]
-                        ma_val = sum(last_n) / n
-                        debug_ma = f"({'+'.join(map(str, last_n))})/{n}"
-                    return ma_val, debug_ma
+if not df_records.empty and "username" in df_records.columns:
+    user_df = df_records[df_records["username"] == current_user]
+    for group_name, group_df in user_df.groupby("class"):
 
-                ma_a, dbg_ma_a = calculate_ma_custom(day_a, fm_prices, current_price, market_open, has_today_data)
-                ma_b, dbg_ma_b = calculate_ma_custom(day_b, fm_prices, current_price, market_open, has_today_data)
-                ma_c, dbg_ma_c = calculate_ma_custom(day_c, fm_prices, current_price, market_open, has_today_data)
+        stock_list = group_df[["no", "day_a", "day_b", "day_c"]].values.tolist()
 
-                if market_open or has_today_data:
-                    last_4_v = fm_vols[-4:]
-                    mv5_custom = (sum(last_4_v) + current_vol) / 5
-                    dbg_mv5 = f"({'+'.join(map(str, last_4_v))}+{current_vol})/5"
-                    formula_type = "即時/盤後"
+        clean_stock_list = [
+            [
+                str((str(item[0]).split(".")[0]).zfill(4)),
+                int(item[1]),
+                int(item[2]),
+                int(item[3]),
+            ]
+            for item in stock_list
+        ]
+
+        all_stock[group_name] = clean_stock_list
+else:
+    all_stock = {}
+
+print(f"all_class:{all_class}")
+print(f"all_stock:{all_stock}")
+
+
+st_autorefresh(interval=10000, key="datarefresh")
+
+with st.container():
+
+    for group in all_class:
+        if group in all_stock:
+            st.markdown(f"## 📁 {group}")
+
+            for config in all_stock[group]:
+                user_stock, day_a, day_b, day_c = config
+
+                max_target = max(day_a, day_b, day_c)
+                history_data = get_history_base(user_stock, max_target)
+                realtime = get_realtime_info(user_stock)
+
+                if history_data and realtime:
+                    prices = [item["收盤價"] for item in history_data]
+                    volumes = [item["成交股數"] / 1000 for item in history_data]
+
+                    ma_daya = sum(prices[-day_a:]) / day_a
+                    ma_dayb = sum(prices[-day_b:]) / day_b
+                    ma_dayc = sum(prices[-day_c:]) / day_c
+
+                    last_4_vol = sum(volumes[-4:])
+                    diff = realtime["price"] - realtime["yesterday_close"]
+                    diff_percent = (diff / realtime["yesterday_close"]) * 100
+
+                    current_t = datetime.now().strftime("%H:%M")
+                    factor = get_est_factor(current_t)
+                    vol_lots = realtime["volume"] / 1000
+                    est_vol_lots = vol_lots * factor
+                    mv_custom = (est_vol_lots + last_4_vol) / 5
+
+                    price_ma_diff = ((realtime["price"] - ma_daya) / ma_daya) * 100
+                    vol_ratio = (est_vol_lots / mv_custom) * 100 if mv_custom > 0 else 0
+
+                    color_cls = (
+                        "stock-up"
+                        if diff > 0
+                        else "stock-down" if diff < 0 else "stock-none"
+                    )
+                    ma_diff_color = (
+                        "highlight-gold" if abs(price_ma_diff) <= 5 else "normal-white"
+                    )
+                    vol_ratio_color = (
+                        "highlight-purple" if vol_ratio >= 200 else "normal-white"
+                    )
+
+                    html_code = f"""
+                        <table class="custom-table">
+                            <thead>
+                                <tr>
+                                    <th>1.代號</th><th>2.名稱</th><th>3.成交價</th><th>4.漲跌(%)</th><th>5.線價比</th>
+                                    <th>6.均線A</th><th>7.天數A</th><th>8.均線B</th><th>9.天數B</th>
+                                    <th>10.均線C</th><th>11.天數C</th>
+                                    <th>12.成交張數</th><th>13.量增比</th><th>14.日均量(張)</th><th>15.預估量(張)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>{user_stock}</td><td>{realtime['name']}</td>
+                                    <td class="{color_cls}">{realtime['price']:.2f}</td>
+                                    <td class="{color_cls}">{diff:+.2f} ({diff_percent:+.2f}%)</td>
+                                    <td class="{ma_diff_color}">{price_ma_diff:+.2f}%</td>
+                                    <td>{ma_daya:.2f}</td><td>{day_a}</td><td>{ma_dayb:.2f}</td><td>{day_b}</td>
+                                    <td>{ma_dayc:.2f}</td><td>{day_c}</td>
+                                    <td style="color: #00D2FF;">{vol_lots:,.0f}</td>
+                                    <td class="{vol_ratio_color}">{vol_ratio:.2f}%</td>
+                                    <td style="color: #BBBBBB;">{mv_custom:.2f}</td>
+                                    <td style="color: #FFA500;">{est_vol_lots:.0f}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        """
+                    st.write(html_code, unsafe_allow_html=True)
                 else:
-                    last_5_v = fm_vols[-5:]
-                    mv5_custom = sum(last_5_v) / 5
-                    dbg_mv5 = f"({'+'.join(map(str, last_5_v))})/5"
-                    formula_type = "假日/無開盤"
-
-                print(f"[{datetime.now(tw_tz).strftime('%H:%M:%S')}] 股票: {stock_no} | 模式: {formula_type}")
-                print(f"  > MA A ({day_a}日) 算式: {dbg_ma_a} = {ma_a:.2f}")
-                print(f"  > MV5 (5日均量) 算式: {dbg_mv5} = {mv5_custom:.2f}")
-
-                diff = current_price - real["yesterday_close"]
-                diff_pct = (diff / real["yesterday_close"] * 100) if real["yesterday_close"] != 0 else 0
-                price_ma_diff = ((current_price - ma_a) / ma_a * 100) if ma_a != 0 else 0
-                
-                curr_t = datetime.now(tw_tz).strftime("%H:%M")  # 使用台灣時間
-                factor = get_est_factor(curr_t)
-                est_vol = current_vol * factor
-                vol_ratio = (est_vol / mv5_custom) if mv5_custom > 0 else 0
-
-                if vol_ratio > 2.0 or price_ma_diff < 5.0:
-                    alerts.append(f"{stock_no} {real['name']}")
-
-                def fmt(val):
-                    if isinstance(val, (int, float)):
-                        return f"{val:g}"
-                    return val
-
-                all_rows.append({
-                    "1.代號": stock_no, 
-                    "2.名稱": real["name"], 
-                    "3.成交價": fmt(current_price), 
-                    "4.漲跌(%)": f"{diff:g} ({diff_pct:.2f}%)", 
-                    "5.線價比": f"{price_ma_diff:.2f}%", 
-                    "6.均線A": fmt(round(ma_a, 2)), 
-                    "7.天數A": day_a, 
-                    "8.均線B": fmt(round(ma_b, 2)), 
-                    "9.天數B": day_b, 
-                    "10.均線C": fmt(round(ma_c, 2)), 
-                    "11.天數C": day_c, 
-                    "12.成交張數": int(current_vol), 
-                    "13.量增比": f"{vol_ratio:.2f}", 
-                    "14.五日均量": fmt(round(mv5_custom, 2)), 
-                    "15.預估量": int(round(est_vol, 0))
-                })
-
-            if all_rows:
-                st.dataframe(style_dataframe(pd.DataFrame(all_rows)), use_container_width=True, hide_index=True)
-
-
-    if alerts:
-        with alert_container:
-            st.error(f"🚨 異常監控警示 (量增>2 或 線價<5%): {', '.join(alerts)}")
-
-    # 底部狀態列更新時間改為台灣時間
-    st.caption(f"最後更新時間：{datetime.now(tw_tz).strftime('%H:%M:%S')} {'(自動監控中)' if is_market_open() else '(非交易時段)'}")
-
-update_stock_tables()
-
+                    st.warning(f"正在抓取 {user_stock} 資料中...")
+    realtime = get_realtime_info(user_stock)
+    print("DEBUG:", user_stock, realtime)
+    st.markdown(
+        f'<div style="text-align: right; color: #888; font-size: 12px;">最後更新：{datetime.now().strftime("%H:%M:%S")}</div>',
+        unsafe_allow_html=True,
+    )
