@@ -189,33 +189,32 @@ def get_history_finmind(stock_no, days):
 
 def get_realtime_twse(stock_no):
     try:
+        # 1. 先嘗試上市 (.TW)
         ticker = yf.Ticker(f"{stock_no}.TW")
         df = ticker.history(period="1d", interval="1m")
+
+        # 2. 如果上市沒資料，嘗試上櫃 (.TWO)
+        if df.empty:
+            ticker = yf.Ticker(f"{stock_no}.TWO")
+            df = ticker.history(period="1d", interval="1m")
+
+        # 取得名稱與昨收 (這兩行會從最後決定的 ticker 抓取)
         stock_name = ticker.info.get('shortName') or ticker.info.get('longName') or stock_no
         y_close = ticker.info.get('previousClose', 0)
+
         if not df.empty:
-
             latest = df.iloc[-1]
-
             return {
                 "name": stock_name,
-
                 "price": round(latest['Close'], 2),
-
                 "volume": int(latest['Volume'] / 1000), # 轉換為「張」
-
                 "high": round(latest['High'], 2),
-
                 "low": round(latest['Low'], 2),
-
                 "yesterday_close": y_close, 
-
                 "time": df.index[-1].astimezone(pytz.timezone('Asia/Taipei')).strftime('%H:%M:%S')
-
             }
 
     except Exception as e:
-
         st.error(f"資料抓取失敗: {e}")
 
     return None
