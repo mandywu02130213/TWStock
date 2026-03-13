@@ -189,43 +189,58 @@ def get_history_finmind(stock_no, days):
 
 def get_realtime_twse(stock_no):
     try:
-        # 1. 先嘗試上市 (.TW)
-        ticker = yf.Ticker(f"{stock_no}.TW")
-        # 抓取 period="1d"，這會回傳今天開盤至今所有的分鐘 K 線
-        df = ticker.history(period="1d", interval="1m")
-
-        # 2. 如果上市沒資料，嘗試上櫃 (.TWO)
-        if df.empty:
-            ticker = yf.Ticker(f"{stock_no}.TWO")
-            df = ticker.history(period="1d", interval="1m")
+        import pandas as pd
+        from datetime import datetime
+        
+        # 1. 取得當天日期 (格式: 2024-05-20)
+        today = datetime.now(tw_tz).strftime("%Y-%m-%d")
+        
+        # 2. 抓取當日分時明細 (TaiwanStockTick)
+        # 這會拿到今天每一筆成交紀錄
+        df = dl.taiwan_stock_tick(
+            stock_id=stock_no,
+            date=today
+        )
 
         if not df.empty:
-            # 取得名稱與昨收 (這裡還是得用 info，但我們只在 df 有資料才抓)
-            info_data = ticker.info
-            stock_name = info_data.get('shortName') or info_data.get('longName') or stock_no
-            y_close = info_data.get('previousClose', 0)
+            # FinMind 的資料欄位：
+            # 'deal_price': 成交價, 'volume': 成交量(張或股，視 API 版本，通常 Tick 是單筆張數)
             
-            latest = df.iloc[-1]
+            # 取得最新一筆價格
+            latest_price = df.iloc[-1]['deal_price']
             
-            # --- 關鍵：成交量計算 ---
-            # df['Volume'] 是每一分鐘的量，加總後才是今天的總成交量
-            # yfinance 的 Volume 單位是「股」，台股習慣看「張」，所以除以 1000
-            total_volume_shares = df['Volume'].sum()
-            total_volume_sheets = int(total_volume_shares / 1000)
+            # 計算當日總成交量 (FinMind 的 Tick Volume 通常已經是「張」)
+            # 如果發現數字大 1000 倍，再除以 1000
+            total_volume = df['volume'].sum()
+            
+            # 計算當日高低點
+            high_price = df['deal_price'].max()
+            low_price = df['deal_price'].min()
+            
+            # 取得「昨收」：這需要改抓另一張表 (taiwan_stock_daily) 拿前一天的最後價格
+            # 為了效能，我們可以先抓昨日收盤
+            df_daily = dl.taiwan_stock_daily(
+                stock_id=stock_no,
+                start_date=(datetime.now(tw_tz) - timedelta(days=10)).strftime("%Y-%m-%d")
+            )
+            y_close = df_daily.iloc[-2]['close'] if len(df_daily) >= 2 else latest_price
+            
+            # 取得名稱 (FinMind 也有基本資訊表)
+            df_info = dl.taiwan_stock_info()
+            stock_name = df_info[df_info['stock_id'] == stock_no]['stock_name'].values[0] if not df_info.empty else stock_no
 
             return {
                 "name": stock_name,
-                "price": round(latest['Close'], 2),
-                "volume": total_volume_sheets, 
-                "high": round(df['High'].max(), 2), # 當日最高價
-                "low": round(df['Low'].min(), 2),   # 當日最低價
+                "price": round(latest_price, 2),
+                "volume": int(total_volume), 
+                "high": round(high_price, 2),
+                "low": round(low_price, 2),
                 "yesterday_close": y_close, 
-                "time": df.index[-1].astimezone(pytz.timezone('Asia/Taipei')).strftime('%H:%M:%S')
+                "time": df.iloc[-1]['time'].split(' ')[1] # 取得 HH:MM:SS
             }
 
     except Exception as e:
-        st.error(f"資料抓取失敗 ({stock_no}): {e}")
-
+        print(f"FinMind 抓取失敗 ({stock_no}): {e}")
     return None
     # try:
 
