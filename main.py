@@ -191,7 +191,7 @@ def get_realtime_twse(stock_no):
     try:
         ticker = yf.Ticker(f"{stock_no}.TW")
         df = ticker.history(period="1d", interval="1m")
-        stock_name = ticker.info.get('longName', 'Unknown')
+        stock_name = ticker.info.get('shortName', 'Unknown')
         y_close = ticker.info.get('previousClose', 0)
         if not df.empty:
 
