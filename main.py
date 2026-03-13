@@ -191,6 +191,7 @@ def get_realtime_twse(stock_no):
     try:
         # 1. 先嘗試上市 (.TW)
         ticker = yf.Ticker(f"{stock_no}.TW")
+        # 抓取 period="1d"，這會回傳今天開盤至今所有的分鐘 K 線
         df = ticker.history(period="1d", interval="1m")
 
         # 2. 如果上市沒資料，嘗試上櫃 (.TWO)
@@ -199,36 +200,31 @@ def get_realtime_twse(stock_no):
             df = ticker.history(period="1d", interval="1m")
 
         if not df.empty:
+            # 取得名稱與昨收 (這裡還是得用 info，但我們只在 df 有資料才抓)
+            info_data = ticker.info
+            stock_name = info_data.get('shortName') or info_data.get('longName') or stock_no
+            y_close = info_data.get('previousClose', 0)
+            
             latest = df.iloc[-1]
             
-            # 使用 fast_info 或 basic_info 來獲取「當日累積總量」與「昨收」
-            # 這比 ticker.info 快，且 Volume 是當天累積至今的總數，不會是 0
-            b_info = ticker.basic_info
-            
-            # 獲取名稱 (這行仍需 info，但我們只在有數據時呼叫一次)
-            # 為了防報錯，建議名稱抓取失敗時用代號代替
-            try:
-                stock_name = ticker.info.get('shortName') or ticker.info.get('longName') or stock_no
-            except:
-                stock_name = stock_no
-
-            # 累積成交量 (單位：股 -> 轉為張)
-            total_volume_shares = b_info.get('last_volume', 0) 
-            if total_volume_shares == 0: # 如果 basic_info 拿不到，才用 sum 備案
-                total_volume_shares = df['Volume'].sum()
+            # --- 關鍵：成交量計算 ---
+            # df['Volume'] 是每一分鐘的量，加總後才是今天的總成交量
+            # yfinance 的 Volume 單位是「股」，台股習慣看「張」，所以除以 1000
+            total_volume_shares = df['Volume'].sum()
+            total_volume_sheets = int(total_volume_shares / 1000)
 
             return {
                 "name": stock_name,
                 "price": round(latest['Close'], 2),
-                "volume": int(total_volume_shares / 1000), # 這裡就是當天總張數
-                "high": round(df['High'].max(), 2),        # 改用當日最高
-                "low": round(df['Low'].min(), 2),          # 改用當日最低
-                "yesterday_close": b_info.get('previous_close', 0), 
+                "volume": total_volume_sheets, 
+                "high": round(df['High'].max(), 2), # 當日最高價
+                "low": round(df['Low'].min(), 2),   # 當日最低價
+                "yesterday_close": y_close, 
                 "time": df.index[-1].astimezone(pytz.timezone('Asia/Taipei')).strftime('%H:%M:%S')
             }
 
     except Exception as e:
-        st.error(f"資料抓取失敗: {e}")
+        st.error(f"資料抓取失敗 ({stock_no}): {e}")
 
     return None
     # try:
