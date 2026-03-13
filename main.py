@@ -227,10 +227,14 @@ def get_realtime_twse(stock_no):
 
         if not df.empty:
             latest = df.iloc[-1]
+            
+            # 修改這裡：將當天所有分鐘的量加總，再除以 1000 轉為「張」
+            total_volume = int(df['Volume'].sum() / 1000)
+
             return {
                 "name": stock_name,
                 "price": round(latest['Close'], 2),
-                "volume": int(latest['Volume'] / 1000), # 轉換為「張」
+                "volume": total_volume, # 使用加總後的總量
                 "high": round(latest['High'], 2),
                 "low": round(latest['Low'], 2),
                 "yesterday_close": y_close, 
