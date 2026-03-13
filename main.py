@@ -214,7 +214,6 @@ def get_realtime_twse(stock_no):
     try:
         # 1. 先嘗試上市 (.TW)
         ticker = yf.Ticker(f"{stock_no}.TW")
-        # period="1d" 抓取今天的 K 線數據
         df = ticker.history(period="1d", interval="1m")
 
         # 2. 如果上市沒資料，嘗試上櫃 (.TWO)
@@ -222,29 +221,22 @@ def get_realtime_twse(stock_no):
             ticker = yf.Ticker(f"{stock_no}.TWO")
             df = ticker.history(period="1d", interval="1m")
 
+        # 取得名稱與昨收 (這兩行會從最後決定的 ticker 抓取)
+        stock_name = ticker.info.get('shortName') or ticker.info.get('longName') or stock_no
+        y_close = ticker.info.get('previousClose', 0)
+
         if not df.empty:
             latest = df.iloc[-1]
             
-            # --- 修改重點 1: 解決成交張數為 0 的問題 ---
-            # 加總當天所有分鐘的成交量，才是總成交張數
+            # 修改這裡：將當天所有分鐘的量加總，再除以 1000 轉為「張」
             total_volume = int(df['Volume'].sum() / 1000)
-
-            # --- 修改重點 2: 解決 Rate Limited (盡量少用 .info) ---
-            # 獲取昨收價的替代方案：從 history 中拿昨天的數據 (或從 info 拿一次)
-            # 如果你一定要拿中文名，建議在 app 外部做一個 dict 對照表，或是緩存它
-            try:
-                info_data = ticker.info
-                stock_name = info_data.get('shortName') or info_data.get('longName') or stock_no
-                y_close = info_data.get('previousClose', 0)
-            except:
-                # 如果被限流抓不到 info，給予預設值避免程式崩潰
-                stock_name = stock_no
-                y_close = latest['Open'] # 備案：拿今日開盤價當參考
 
             return {
                 "name": stock_name,
                 "price": round(latest['Close'], 2),
-                "volume": total_volume, # 修正後
+                "volume": total_volume, # 使用加總後的總量
+                "high": round(latest['High'], 2),
+                "low": round(latest['Low'], 2),
                 "yesterday_close": y_close, 
                 "time": df.index[-1].astimezone(pytz.timezone('Asia/Taipei')).strftime('%H:%M:%S')
             }
