@@ -8,4 +8,4 @@ streamlit-autorefresh
 FinMind
 tqdm
 pytz
-yfinance==26.0.1
+yfinance
