@@ -9,3 +9,4 @@ FinMind
 tqdm
 pytz
 yfinance
+twstock
