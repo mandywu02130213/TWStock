@@ -268,8 +268,10 @@ refresh_rate = 10.0 if is_market_open() else None
 
 @st.fragment(run_every=refresh_rate)
 def update_stock_tables():
-    main_placeholder = st.empty()
-    with main_placeholder.container():
+    container = st.container()
+    # main_placeholder = st.empty()
+    # with main_placeholder.container():
+    with container:
         s_data = sheet1.get_all_records()
         st.write(f"讀取到 {len(s_data)} 筆原始資料") # 測試點 2
         alert_container = st.container()
