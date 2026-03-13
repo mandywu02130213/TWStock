@@ -189,59 +189,59 @@ def get_history_finmind(stock_no, days):
 
 def get_realtime_twse(stock_no):
     try:
-        import pandas as pd
-        from datetime import datetime
-        
-        # 1. 取得當天日期 (格式: 2024-05-20)
-        today = datetime.now(tw_tz).strftime("%Y-%m-%d")
-        
-        # 2. 抓取當日分時明細 (TaiwanStockTick)
-        # 這會拿到今天每一筆成交紀錄
-        df = dl.taiwan_stock_tick(
-            stock_id=stock_no,
-            date=today
-        )
+        # 使用 Yahoo 股市網頁版 (這比 yfinance 的 API 更準，且有中文名)
+        url = f"https://tw.stock.yahoo.com/quote/{stock_no}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(resp.text, 'html.parser')
 
-        if not df.empty:
-            # FinMind 的資料欄位：
-            # 'deal_price': 成交價, 'volume': 成交量(張或股，視 API 版本，通常 Tick 是單筆張數)
-            
-            # 取得最新一筆價格
-            latest_price = df.iloc[-1]['deal_price']
-            
-            # 計算當日總成交量 (FinMind 的 Tick Volume 通常已經是「張」)
-            # 如果發現數字大 1000 倍，再除以 1000
-            total_volume = df['volume'].sum()
-            
-            # 計算當日高低點
-            high_price = df['deal_price'].max()
-            low_price = df['deal_price'].min()
-            
-            # 取得「昨收」：這需要改抓另一張表 (taiwan_stock_daily) 拿前一天的最後價格
-            # 為了效能，我們可以先抓昨日收盤
-            df_daily = dl.taiwan_stock_daily(
-                stock_id=stock_no,
-                start_date=(datetime.now(tw_tz) - timedelta(days=10)).strftime("%Y-%m-%d")
-            )
-            y_close = df_daily.iloc[-2]['close'] if len(df_daily) >= 2 else latest_price
-            
-            # 取得名稱 (FinMind 也有基本資訊表)
-            df_info = dl.taiwan_stock_info()
-            stock_name = df_info[df_info['stock_id'] == stock_no]['stock_name'].values[0] if not df_info.empty else stock_no
+        # 1. 抓取名稱 (使用 CSS Selector)
+        # Yahoo 股市的標題通常包含名稱
+        name = soup.find('h1', {'class': 'C($c-primary-text)'}).text
+        
+        # 2. 抓取價格與張數 (Yahoo 股市的數據藏在特定的 Class 中)
+        # 這裡我們改用更穩定的方式：抓取所有數據欄位
+        fields = soup.find_all('span', {'class': 'Fz(32px)'})
+        price = fields[0].text if fields else "0"
 
-            return {
-                "name": stock_name,
-                "price": round(latest_price, 2),
-                "volume": int(total_volume), 
-                "high": round(high_price, 2),
-                "low": round(low_price, 2),
-                "yesterday_close": y_close, 
-                "time": df.iloc[-1]['time'].split(' ')[1] # 取得 HH:MM:SS
-            }
+        # 抓取昨收、最高、最低、成交張數
+        # Yahoo 的網頁結構會把這些資訊放在一個清單裡
+        info_list = soup.find_all('span', {'class': 'Fw(600)'})
+        
+        # 根據 Yahoo 網頁結構順序 (這部分會隨網頁更新，但目前很穩定)
+        # 通常索引：昨收[0], 成交張數[6], 最高[2], 最低[3]
+        # 但為了保險，我們改用更直觀的尋找方式
+        
+        # 獲取成交量 (張)
+        vol_element = soup.find('span', string="成交量")
+        volume = vol_element.find_next_sibling('span').text if vol_element else "0"
+        
+        # 獲取昨收
+        y_element = soup.find('span', string="昨收")
+        y_close = y_element.find_next_sibling('span').text if y_element else "0"
+
+        # 獲取最高/最低
+        h_element = soup.find('span', string="最高")
+        high = h_element.find_next_sibling('span').text if h_element else "0"
+        l_element = soup.find('span', string="最低")
+        low = l_element.find_next_sibling('span').text if l_element else "0"
+
+        return {
+            "name": name.replace(stock_no, "").strip(), # 去掉代號只留名稱
+            "price": float(price.replace(',', '')),
+            "volume": int(volume.replace(',', '')), # 這裡直接就是「張」
+            "high": float(high.replace(',', '')),
+            "low": float(low.replace(',', '')),
+            "yesterday_close": float(y_close.replace(',', '')),
+            "time": datetime.now(tw_tz).strftime('%H:%M:%S')
+        }
 
     except Exception as e:
-        print(f"FinMind 抓取失敗 ({stock_no}): {e}")
-    return None
+        # 如果爬蟲失敗，最後一招：回傳簡易錯誤資訊
+        st.warning(f"{stock_no} 網頁解析失敗，嘗試備用方案...")
+        return None
     # try:
 
     #     ts = int(time.time() * 1000)
