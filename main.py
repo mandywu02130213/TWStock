@@ -213,21 +213,24 @@ def get_history_finmind(stock_no, days):
 def get_realtime_twse(stock_no):
     try:
         ticker = yf.Ticker(f"{stock_no}.TW")
-        info = ticker.fast_info
+        # 獲取今日最近的成交數據
+        df = ticker.history(period="1d")
         
-        price = info.last_price
-        yesterday_close = info.previous_close
-        volume = int(info.last_volume / 1000)  # 換算成張
-        
-        if not price or price == 0:
-            raise ValueError("價格為空")
-        
-        return {
-            "name": stock_no,
-            "price": round(float(price), 2),
-            "volume": volume,
-            "yesterday_close": round(float(yesterday_close), 2)
-        }
+        if df.empty:
+            # 嘗試上櫃市場代號
+            ticker = yf.Ticker(f"{stock_no}.TWO")
+            df = ticker.history(period="1d")
+
+        if not df.empty:
+            latest = df.iloc[-1]
+            prev_close = ticker.info.get('previousClose', latest['Close'])
+            return {
+                "name": stock_no,
+                "price": round(float(latest['Close']), 2),
+                "volume": int(latest['Volume'] / 1000), # 換算成張
+                "yesterday_close": round(float(prev_close), 2)
+            }
+        return None
     except Exception as e:
         print(f"Yahoo 即時資料失敗 {stock_no}: {e}")
         return None
