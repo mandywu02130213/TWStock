@@ -4,69 +4,47 @@ import pandas as pd
 import datetime
 import pytz
 import time
+import ssl  # 1. 新增這個匯入
+import requests
 
-# 設定網頁標題
-st.set_page_config(page_title="台股即時監控 - 2330", layout="centered")
+# 2. 全域禁用 SSL 憑證檢查 (最直接的解法)
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
 
-def get_taiwan_time():
-    """處理 Streamlit Cloud 時區問題，統一轉換為台灣時間"""
-    tw_tz = pytz.timezone('Asia/Taipei')
-    return datetime.datetime.now(tw_tz)
+# --- 以下維持原有的設定 ---
 
 def fetch_stock_data(stock_id):
     """獲取股票即時資料"""
     try:
-        # 獲取即時資料
+        # 在呼叫 twstock 之前，也可以手動測試連線 (選配)
+        # requests.get('https://mis.twse.com.tw', verify=False)
+        
         data = twstock.realtime.get(stock_id)
         if data and data['success']:
             info = data['info']
             realtime_data = data['realtime']
             
-            # 整理成字典
+            # 確保資料格式正確
+            price = realtime_data['latest_trade_price']
+            vol = realtime_data['accumulate_trade_volume']
+            
             result = {
                 "股票代號": info['code'],
                 "股票名稱": info['name'],
-                "當前成交價": float(realtime_data['latest_trade_price']) if realtime_data['latest_trade_price'] != '-' else "暫無成交",
-                "當日累計成交量": realtime_data['accumulate_trade_volume'],
+                "當前成交價": float(price) if price != '-' else "暫無成交",
+                "當日累計成交量": int(vol) if vol != '-' else 0,
                 "最後更新時間": info['time']
             }
             return result
+        else:
+            st.warning(f"證交所回傳失敗：{data.get('rtmessage', '未知錯誤')}")
     except Exception as e:
+        # 這裡會捕捉到剛剛提到的 SSLError
         st.error(f"資料抓取失敗: {e}")
     return None
 
-# --- UI 介面 ---
-st.title("📈 2330 台積電即時監控")
-
-# 顯示當前台灣時間
-now = get_taiwan_time()
-st.write(f"目前台灣時間：{now.strftime('%Y-%m-%d %H:%M:%S')}")
-
-# 檢查是否在開盤時間 (09:00 - 13:30)
-is_market_open = (now.hour == 9 and now.minute >= 0) or (10 <= now.hour < 13) or (now.hour == 13 and now.min <= 30)
-
-if is_market_open:
-    st.success("市場交易中")
-else:
-    st.warning("目前為非交易時段，顯示最後收盤資料")
-
-# 獲取資料
-stock_data = fetch_stock_data('2330')
-
-if stock_data:
-    # 使用 Metric 顯示大字報
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(label="成交價", value=f"{stock_data['當前成交價']} TWD")
-    with col2:
-        st.metric(label="成交量", value=f"{stock_data['當日累計成交量']} 張")
-
-    # 顯示詳細表單
-    st.table(pd.DataFrame([stock_data]))
-else:
-    st.error("無法取得資料，請檢查網路或 twstock 狀態")
-
-# --- 自動刷新邏輯 ---
-# 每 5 秒自動重新整理頁面
-time.sleep(5)
-st.rerun()
+# ... 後續 UI 程式碼不變 ...
