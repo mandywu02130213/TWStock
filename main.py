@@ -189,22 +189,17 @@ def get_history_finmind(stock_no, days):
 
 def get_realtime_twse(stock_no):
     try:
-
-        # 台股代碼在 yfinance 中需加上 .TW
-
-        ticker = yf.Ticker("2330.TW")
-
-        # 抓取當天即時數據 (1分鐘層級)
-        
+        ticker = yf.Ticker(f"{stock_no}.TW")
         df = ticker.history(period="1d", interval="1m")
         stock_name = ticker.info.get('longName', 'Unknown')
+        y_close = ticker.info.get('previousClose', 0)
         if not df.empty:
 
             latest = df.iloc[-1]
 
             return {
                 "name": stock_name,
-                
+
                 "price": round(latest['Close'], 2),
 
                 "volume": int(latest['Volume'] / 1000), # 轉換為「張」
@@ -212,6 +207,8 @@ def get_realtime_twse(stock_no):
                 "high": round(latest['High'], 2),
 
                 "low": round(latest['Low'], 2),
+
+                "yesterday_close": y_close, 
 
                 "time": df.index[-1].astimezone(pytz.timezone('Asia/Taipei')).strftime('%H:%M:%S')
 
