@@ -1,92 +1,73 @@
 import streamlit as st
-import twstock
+import yfinance as yf
 import pandas as pd
 import datetime
 import pytz
 import time
-import requests
-import urllib3
 
-# --- 關鍵修正：解決 Streamlit Cloud 的 SSL 憑證問題 ---
-# 1. 禁用警告訊息
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# 2. 強制讓 requests 預設不驗證 SSL (針對 twstock 底層)
-session = requests.Session()
-session.verify = False
-requests.get = session.get
-# --------------------------------------------------
-
+# 頁面基本設定
 st.set_page_config(page_title="2330 即時監控", layout="wide")
 
 def get_taiwan_time():
-    """處理 Streamlit Cloud 時區，確保與台灣同步"""
+    """處理 Streamlit Cloud 時區問題"""
     tw_tz = pytz.timezone('Asia/Taipei')
     return datetime.datetime.now(tw_tz)
 
-@st.cache_data(ttl=3)
-def fetch_stock_data(stock_id):
-    """獲取股票即時資料"""
+def fetch_2330_data():
+    """使用 yfinance 抓取台積電資料"""
     try:
-        # 這裡 twstock 會呼叫被我們修改過的 requests
-        data = twstock.realtime.get(stock_id)
-        if data and data['success']:
-            return data
+        # 台股代碼在 yfinance 中需加上 .TW
+        ticker = yf.Ticker("2330.TW")
+        # 抓取當天即時數據 (1分鐘層級)
+        df = ticker.history(period="1d", interval="1m")
+        if not df.empty:
+            latest = df.iloc[-1]
+            return {
+                "price": round(latest['Close'], 2),
+                "volume": int(latest['Volume'] / 1000), # 轉換為「張」
+                "high": round(latest['High'], 2),
+                "low": round(latest['Low'], 2),
+                "time": df.index[-1].astimezone(pytz.timezone('Asia/Taipei')).strftime('%H:%M:%S')
+            }
     except Exception as e:
-        st.error(f"連線異常: {e}")
+        st.error(f"資料抓取失敗: {e}")
     return None
 
 # --- UI 介面 ---
-st.title("🚀 台積電 (2330) 即時監控牆")
+st.title("📈 台積電 (2330) 即時監控牆")
 
 now = get_taiwan_time()
 st.info(f"📅 台灣時間：{now.strftime('%Y-%m-%d %H:%M:%S')}")
 
-# 判斷開盤狀態
-is_weekday = now.weekday() < 5
-is_market_time = (datetime.time(9, 0) <= now.time() <= datetime.time(13, 35))
-is_open = is_weekday and is_market_time
+# 檢查開盤狀態 (09:00 - 13:30)
+is_open = (now.weekday() < 5) and (9 <= now.hour < 14)
 
-if not is_open:
-    st.warning("⚠️ 目前非交易時段，資料可能為最後收盤價或不更新。")
+# 執行抓取
+data = fetch_2330_data()
 
-# 獲取資料
-raw_data = fetch_stock_data('2330')
-
-if raw_data:
-    info = raw_data['info']
-    realtime = raw_data['realtime']
-    
-    # 數值處理（處理可能為 '-' 的情況）
-    def clean_val(val):
-        return val if val != '-' else "0"
-
-    price = clean_val(realtime['latest_trade_price'])
-    vol = clean_val(realtime['accumulate_trade_volume'])
-    high = clean_val(realtime['high'])
-    low = clean_val(realtime['low'])
-    open_p = clean_val(realtime['open'])
-
+if data:
     # 建立儀表板
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("成交價", f"{price} TWD")
-    m2.metric("成交量", f"{vol} 張")
-    m3.metric("今日最高", f"{high}")
-    m4.metric("今日最低", f"{low}")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("成交價", f"{data['price']} TWD")
+    col2.metric("當分鐘成交量", f"{data['volume']} 張")
+    col3.metric("最後更新時間", data['time'])
 
-    # 整理表格
-    df_data = {
-        "指標項目": ["股票代碼", "名稱", "開盤價", "更新時間"],
-        "數值": [info['code'], info['name'], open_p, info['time']]
-    }
-    st.table(pd.DataFrame(df_data))
+    # 製作小表格
+    st.write("### 今日盤中資訊")
+    status_df = pd.DataFrame({
+        "項目": ["當日最高", "當日最低", "監控狀態"],
+        "數值": [f"{data['high']}", f"{data['low']}", "連線正常 (Yahoo Finance API)"]
+    })
+    st.table(status_df)
 else:
-    st.error("❌ 無法從證交所抓取資料。這通常是 IP 被暫時限制或證交所主機維護。")
+    st.error("目前無法獲取資料，請稍後再試。")
 
-# --- 自動更新機制 ---
-# 考慮到 Streamlit Cloud 效能與安全性，建議設為 10 秒
-# 若堅持 5 秒請改為 time.sleep(5)
-st.divider()
-st.caption("系統將在 10 秒後自動刷新...")
-time.sleep(10)
-st.rerun()
+# --- 自動刷新 ---
+if is_open:
+    st.write("🔄 市場交易中，每 5 秒自動更新...")
+    time.sleep(5)
+    st.rerun()
+else:
+    st.write("😴 目前非交易時段，停止自動刷新以節省資源。")
+    if st.button("手動刷新"):
+        st.rerun()
